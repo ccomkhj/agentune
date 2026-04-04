@@ -14,4 +14,9 @@ def get_backend(name: str) -> type:
 
 
 from agentune.backends.xgboost import XGBoostBackend
+from agentune.backends.lightgbm import LightGBMBackend
+from agentune.backends.catboost import CatBoostBackend
+
 register_backend("xgboost", XGBoostBackend)
+register_backend("lightgbm", LightGBMBackend)
+register_backend("catboost", CatBoostBackend)

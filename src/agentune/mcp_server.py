@@ -94,6 +94,20 @@ def handle_submit_action_proposal(db: Database, campaign_name: str, proposal_dic
     return service.submit_proposal(campaign["id"], proposal)
 
 
+def handle_generate_report(db: Database, campaign_name: str) -> str:
+    from agentune.report import generate_report
+
+    return generate_report(db, campaign_name)
+
+
+def handle_get_tuning_guide(backend_name: str) -> dict:
+    from agentune.backends import get_backend
+
+    backend_cls = get_backend(backend_name)
+    backend = backend_cls()
+    return backend.tuning_guide().to_dict()
+
+
 # --- MCP Server setup ---
 
 def create_server() -> Server:
@@ -168,6 +182,24 @@ def create_server() -> Server:
                     "required": ["campaign_name", "proposal"],
                 },
             ),
+            Tool(
+                name="generate_report",
+                description="Generate an HTML report for a campaign with score progression, round details, decisions, and best params",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"campaign_name": {"type": "string"}},
+                    "required": ["campaign_name"],
+                },
+            ),
+            Tool(
+                name="get_tuning_guide",
+                description="Get backend-specific tuning knowledge: what each param does, how they interact, diagnostic patterns (overfitting/underfitting signals), and recommended tuning order. Read this BEFORE making decisions.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"backend_name": {"type": "string", "enum": ["xgboost", "lightgbm", "catboost"]}},
+                    "required": ["backend_name"],
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -186,6 +218,11 @@ def create_server() -> Server:
                 result = handle_run_next_round(db, arguments["campaign_name"])
             elif name == "submit_action_proposal":
                 result = handle_submit_action_proposal(db, arguments["campaign_name"], arguments["proposal"])
+            elif name == "generate_report":
+                html = handle_generate_report(db, arguments["campaign_name"])
+                return [TextContent(type="text", text=html)]
+            elif name == "get_tuning_guide":
+                result = handle_get_tuning_guide(arguments["backend_name"])
             else:
                 result = {"error": f"Unknown tool: {name}"}
             return [TextContent(type="text", text=json.dumps(result, default=str))]

@@ -152,6 +152,9 @@ class RoundSummary:
     param_importance: dict[str, float] = field(default_factory=dict)
     param_ranges_used: dict[str, tuple] = field(default_factory=dict)
 
+    # Test set evaluation
+    test_score: float | None = None
+
     # Health
     generalization_gap: float | None = None
     failure_rate: float = 0.0

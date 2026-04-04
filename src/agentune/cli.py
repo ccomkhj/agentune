@@ -401,6 +401,26 @@ def export_cmd(name: str) -> None:
 
 @cli.command()
 @click.argument("name")
+@click.option("--output", "-o", default=None, help="Output file path (default: <name>-report.html)")
+def report(name: str, output: str | None) -> None:
+    """Generate an HTML report for a campaign."""
+    from agentune.report import generate_report
+
+    db = _get_db()
+    try:
+        html = generate_report(db, name)
+        out_path = output or f"{name}-report.html"
+        with open(out_path, "w") as f:
+            f.write(html)
+        click.echo(f"Report written to {out_path}")
+    except Exception as error:
+        _exit_for_exception(error)
+    finally:
+        db.close()
+
+
+@cli.command()
+@click.argument("name")
 @click.option("--dataset", required=True, help="Dataset name: breast_cancer, california_housing, digits")
 @click.option("--split-seed", default=42, type=int)
 def run(name: str, dataset: str, split_seed: int) -> None:

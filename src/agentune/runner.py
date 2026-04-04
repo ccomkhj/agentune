@@ -189,15 +189,28 @@ class RoundRunner:
         sampler = optuna.samplers.TPESampler(seed=sampler_config.get("seed", 42))
 
         study_name = current_round["optuna_study_name"]
-        try:
-            study = optuna.load_study(study_name=study_name, storage=storage, sampler=sampler)
-        except KeyError:
+        is_new_study = current_round.get("parent_round_id") is not None
+        if is_new_study:
+            # Structural action (narrow/widen/revise) — need a fresh study.
+            # Delete stale study from previous failed runs if it exists.
+            with suppress(KeyError):
+                optuna.delete_study(study_name=study_name, storage=storage)
             study = optuna.create_study(
                 study_name=study_name,
                 storage=storage,
                 direction=campaign["objective_direction"],
                 sampler=sampler,
             )
+        else:
+            try:
+                study = optuna.load_study(study_name=study_name, storage=storage, sampler=sampler)
+            except KeyError:
+                study = optuna.create_study(
+                    study_name=study_name,
+                    storage=storage,
+                    direction=campaign["objective_direction"],
+                    sampler=sampler,
+                )
 
         # Create backend and objective
         backend_cls = get_backend(campaign["backend"])
@@ -232,6 +245,14 @@ class RoundRunner:
             action_that_created="init" if round_number == 1 else "agent",
             cumulative_wall_time=cumulative_wall,
         )
+        # Evaluate best params on held-out test set
+        if summary.best_params:
+            with suppress(Exception):
+                test_score = backend.evaluate_test(
+                    self._dataset, campaign["metric_name"], summary.best_params,
+                )
+                summary.test_score = test_score
+
         self._service.write_summary(current_round["id"], summary.to_dict())
 
         # Post-round hard stop check
