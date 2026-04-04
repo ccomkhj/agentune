@@ -3,11 +3,31 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
 import optuna
+
+logger = logging.getLogger(__name__)
+
+try:
+    import mlflow as _mlflow
+except ImportError:
+    _mlflow = None  # type: ignore[assignment]
+
+
+def _get_mlflow():
+    """Return mlflow module if tracking URI is configured, else None."""
+    if _mlflow is None:
+        return None
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if not tracking_uri:
+        return None
+    _mlflow.set_tracking_uri(tracking_uri)
+    return _mlflow
 
 from agentune.backends import get_backend
 from agentune.core.campaign import CampaignService
@@ -30,6 +50,7 @@ class RunResult:
     status: str  # AWAITING_AGENT, COMPLETED, FAILED
     round_number: int
     stop_reason: str | None = None
+    report_path: str | None = None
 
 
 class RoundRunner:
@@ -43,6 +64,66 @@ class RoundRunner:
         if isinstance(value, str):
             return json.loads(value)
         return value
+
+    def _log_to_mlflow(
+        self,
+        campaign: dict,
+        round_number: int,
+        summary: RoundSummary,
+        study: Any,
+        trial_offset: int,
+        trial_end: int,
+    ) -> None:
+        """Log round results to MLflow if MLFLOW_TRACKING_URI is set."""
+        ml = _get_mlflow()
+        if ml is None:
+            return
+        try:
+            experiment_name = f"agentune/{campaign['name']}"
+            ml.set_experiment(experiment_name)
+
+            with ml.start_run(run_name=f"round-{round_number}"):
+                ml.log_metric("best_score", summary.best_score or 0)
+                if summary.test_score is not None:
+                    ml.log_metric("test_score", summary.test_score)
+                if summary.delta_from_prev is not None:
+                    ml.log_metric("delta_from_prev", summary.delta_from_prev)
+                ml.log_metric("failure_rate", summary.failure_rate)
+                ml.log_metric("round_wall_time", summary.round_wall_time_seconds)
+
+                for pname, pval in summary.param_importance.items():
+                    ml.log_metric(f"importance/{pname}", pval)
+
+                if summary.best_params:
+                    ml.log_params({k: str(v) for k, v in summary.best_params.items()})
+
+                for trial in study.trials[trial_offset:trial_end]:
+                    if trial.state.name == "COMPLETE":
+                        with ml.start_run(run_name=f"trial-{trial.number}", nested=True):
+                            ml.log_params({k: str(v) for k, v in trial.params.items()})
+                            ml.log_metric("value", trial.value)
+                            for attr_key, attr_val in trial.user_attrs.items():
+                                if isinstance(attr_val, (int, float)):
+                                    ml.log_metric(attr_key, attr_val)
+        except Exception:
+            logger.warning("MLflow logging failed", exc_info=True)
+
+    def _auto_generate_report(self, campaign_id: int) -> str | None:
+        """Generate HTML report to reports/<campaign_name>.html. Returns path or None on error."""
+        try:
+            from agentune.report import generate_report
+
+            campaign = self._service.get_campaign(campaign_id)
+            name = campaign["name"]
+            html = generate_report(self._db, name)
+            reports_dir = os.path.join(os.getcwd(), "reports")
+            os.makedirs(reports_dir, exist_ok=True)
+            path = os.path.join(reports_dir, f"{name}-report.html")
+            with open(path, "w") as f:
+                f.write(html)
+            return path
+        except Exception:
+            return None
 
     def _cumulative_wall_time(self, rounds: list[dict]) -> float:
         total = 0.0
@@ -88,7 +169,8 @@ class RoundRunner:
             campaign_id, CampaignState.COMPLETED,
             termination_reason=stop_reason,
         )
-        return RunResult("COMPLETED", round_row["round_number"], stop_reason)
+        report_path = self._auto_generate_report(campaign_id)
+        return RunResult("COMPLETED", round_row["round_number"], stop_reason, report_path)
 
     def _complete_after_summary(
         self,
@@ -103,7 +185,8 @@ class RoundRunner:
             campaign_id, CampaignState.COMPLETED,
             termination_reason=stop_reason,
         )
-        return RunResult("COMPLETED", round_number, stop_reason)
+        report_path = self._auto_generate_report(campaign_id)
+        return RunResult("COMPLETED", round_number, stop_reason, report_path)
 
     def run_next_round(self, campaign_id: int) -> RunResult:
         lease = LeaseManager(self._db)
@@ -119,6 +202,7 @@ class RoundRunner:
     def _handle_failure(self, campaign_id: int, exc: Exception) -> RunResult:
         """Mark round and campaign as FAILED with details."""
         detail = f"{type(exc).__name__}: {exc}"
+        round_number = 0
 
         try:
             campaign = self._service.get_campaign(campaign_id)
@@ -255,6 +339,9 @@ class RoundRunner:
 
         self._service.write_summary(current_round["id"], summary.to_dict())
 
+        # Log to MLflow if configured
+        self._log_to_mlflow(campaign, round_number, summary, study, trial_offset, trial_end)
+
         # Post-round hard stop check
         hard_stop = Scheduler.check_hard_stop(
             stop_cond, summary.best_score, campaign["objective_direction"],
@@ -287,7 +374,9 @@ class RoundRunner:
                 conn.execute(
                     "UPDATE campaigns SET pause_requested = false WHERE id = %s", (campaign_id,)
                 )
-            return RunResult("AWAITING_AGENT", round_number)
+            report_path = self._auto_generate_report(campaign_id)
+            return RunResult("AWAITING_AGENT", round_number, report_path=report_path)
 
         self._service.transition_round(current_round["id"], RoundState.AWAITING_AGENT)
-        return RunResult("AWAITING_AGENT", round_number)
+        report_path = self._auto_generate_report(campaign_id)
+        return RunResult("AWAITING_AGENT", round_number, report_path=report_path)

@@ -6,7 +6,22 @@ build-backend = "hatchling.build"
 name = "agentune"
 version = "0.1.0"
 description = "Agent-driven hyperparameter optimization with Optuna"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
+authors = [
+    { name = "Huijo Kim" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Repository = "https://github.com/huijokim/agentune"
 dependencies = [
     "optuna>=3.6,<4",
     "psycopg[binary]>=3.1,<4",
@@ -16,9 +31,11 @@ dependencies = [
     "mcp>=1.0,<2",
     "sqlalchemy>=2.0.48",
     "psycopg2-binary>=2.9.11",
-    "pandas>=3.0.2",
+    "pandas>=2.0",
     "lightgbm>=4.6.0",
     "catboost>=1.2.10",
+    "mlforecast>=1.0.0",
+    "mlflow>=3.10,<4",
 ]
 
 [project.optional-dependencies]

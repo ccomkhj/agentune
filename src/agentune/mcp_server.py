@@ -14,6 +14,34 @@ from agentune.core.db import Database
 from agentune.core.models import ActionProposal
 
 
+# Terminal campaign states where test_score is safe to expose
+_TERMINAL_STATES = {"COMPLETED", "FAILED", "STOPPED"}
+
+
+def _strip_test_score_from_summary(round_row: dict) -> dict:
+    """Return a copy of the round row with test_score removed from its summary."""
+    if round_row is None:
+        return round_row
+    summary = round_row.get("summary")
+    if summary is None:
+        return round_row
+    if isinstance(summary, str):
+        summary = json.loads(summary)
+    else:
+        summary = dict(summary)
+    summary.pop("test_score", None)
+    round_row = dict(round_row)
+    round_row["summary"] = summary
+    return round_row
+
+
+def _maybe_strip_test_score(round_row: dict, campaign_state: str) -> dict:
+    """Strip test_score from a round's summary if the campaign is still active."""
+    if campaign_state in _TERMINAL_STATES:
+        return round_row
+    return _strip_test_score_from_summary(round_row)
+
+
 # --- Handler functions (testable without MCP transport) ---
 
 def _get_campaign_or_raise(service: CampaignService, campaign_name: str) -> dict:
@@ -34,6 +62,8 @@ def handle_get_campaign_status(db: Database, campaign_name: str) -> dict:
     campaign = _get_campaign_or_raise(service, campaign_name)
     rounds = service.get_rounds(campaign["id"])
     latest_round = rounds[-1] if rounds else None
+    if latest_round is not None:
+        latest_round = _maybe_strip_test_score(latest_round, campaign["state"])
     return {
         **campaign,
         "total_rounds": len(rounds),
@@ -50,17 +80,21 @@ def handle_get_round_summary(db: Database, campaign_name: str, round_number: int
         target_round = next((round_row for round_row in rounds if round_row["round_number"] == round_number), None)
         if target_round is None:
             raise ValueError(f"Round {round_number} not found")
-        return target_round
+        return _maybe_strip_test_score(target_round, campaign["state"])
 
     if not rounds:
         raise ValueError("No rounds found")
-    return rounds[-1]
+    return _maybe_strip_test_score(rounds[-1], campaign["state"])
 
 
 def handle_get_campaign_history(db: Database, campaign_name: str) -> dict:
     service = CampaignService(db)
     campaign = _get_campaign_or_raise(service, campaign_name)
-    return service.get_campaign_history(campaign["id"])
+    history = service.get_campaign_history(campaign["id"])
+    state = campaign["state"]
+    if state not in _TERMINAL_STATES:
+        history["rounds"] = [_maybe_strip_test_score(r, state) for r in history["rounds"]]
+    return history
 
 
 def handle_run_next_round(db: Database, campaign_name: str) -> dict:
@@ -84,6 +118,7 @@ def handle_run_next_round(db: Database, campaign_name: str) -> dict:
         "status": result.status,
         "round_number": result.round_number,
         "stop_reason": result.stop_reason,
+        "report_path": result.report_path,
     }
 
 

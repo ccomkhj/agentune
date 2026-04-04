@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: agentune
+          POSTGRES_USER: agentune
+          POSTGRES_PASSWORD: agentune
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentune"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      AGENTUNE_DB_URL: postgresql://agentune:agentune@localhost:5432/agentune
+      AGENTUNE_TEST_DB_URL: postgresql://agentune:agentune@localhost:5432/agentune_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Create test database
+        run: |
+          PGPASSWORD=agentune psql -h localhost -U agentune -c "CREATE DATABASE agentune_test;"
+
+      - name: Run tests
+        run: uv run pytest tests/ -v --tb=short
+
+      - name: Build package
+        run: uv build

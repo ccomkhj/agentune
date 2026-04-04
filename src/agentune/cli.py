@@ -82,9 +82,10 @@ def cli() -> None:
 @cli.command()
 @click.argument("name")
 @click.option("--backend", default="xgboost")
-@click.option("--metric", required=True)
-@click.option("--direction", required=True, type=click.Choice(["minimize", "maximize"]))
-@click.option("--dataset", required=True, help="Dataset name: breast_cancer, california_housing, digits")
+@click.option("--metric", default=None, help="Metric to optimize (default: inferred from dataset)")
+@click.option("--direction", default=None, type=click.Choice(["minimize", "maximize"]),
+              help="Optimization direction (default: inferred from dataset)")
+@click.option("--dataset", required=True, help="Dataset name: breast_cancer, california_housing, digits, covertype, credit_g, phoneme, store_sales, rossmann")
 @click.option("--trials-per-round", default=50, type=int)
 @click.option("--max-rounds", default=None, type=int)
 @click.option("--max-trials", default=None, type=int)
@@ -99,8 +100,8 @@ def cli() -> None:
 def init(
     name: str,
     backend: str,
-    metric: str,
-    direction: str,
+    metric: str | None,
+    direction: str | None,
     dataset: str,
     trials_per_round: int,
     max_rounds: int | None,
@@ -114,6 +115,31 @@ def init(
     split_seed: int,
 ) -> None:
     """Create a new optimization campaign."""
+    from agentune.datasets import DATASETS
+
+    dataset_info = DATASETS.get(dataset)
+    if dataset_info is None:
+        _exit_with_error(f"Unknown dataset '{dataset}'. Available: {', '.join(DATASETS)}")
+
+    canonical_metric = dataset_info["metric"]
+    canonical_direction = dataset_info["direction"]
+
+    if metric is None:
+        metric = canonical_metric
+    elif metric != canonical_metric:
+        click.echo(
+            f"Warning: dataset '{dataset}' is typically used with metric "
+            f"'{canonical_metric}', but you specified '{metric}'."
+        )
+
+    if direction is None:
+        direction = canonical_direction
+    elif direction != canonical_direction:
+        click.echo(
+            f"Warning: dataset '{dataset}' is typically used with direction "
+            f"'{canonical_direction}', but you specified '{direction}'."
+        )
+
     db = _get_db()
     service = CampaignService(db)
 
@@ -421,7 +447,7 @@ def report(name: str, output: str | None) -> None:
 
 @cli.command()
 @click.argument("name")
-@click.option("--dataset", required=True, help="Dataset name: breast_cancer, california_housing, digits")
+@click.option("--dataset", required=True, help="Dataset name (see 'agentune init --help' for available datasets). Metric and direction are stored in the campaign config.")
 @click.option("--split-seed", default=42, type=int)
 def run(name: str, dataset: str, split_seed: int) -> None:
     """Execute the next study round for a campaign."""

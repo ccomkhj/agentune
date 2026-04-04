@@ -92,3 +92,96 @@ class TestRunNextRound:
     def test_run_next_round_not_found(self, db):
         with pytest.raises(ValueError, match="not found"):
             handle_run_next_round(db, "nonexistent")
+
+
+class TestTestScoreStripping:
+    """test_score must be stripped from MCP responses while a campaign is active."""
+
+    SUMMARY_WITH_TEST_SCORE = {
+        "schema_version": 1,
+        "best_score": 0.95,
+        "test_score": 0.93,
+        "param_importance": {"max_depth": 0.6},
+        "plateau_signal": False,
+    }
+
+    @pytest.fixture
+    def active_campaign(self, service, db):
+        """Create a campaign in RUNNING state with a round that has a summary containing test_score."""
+        config = CampaignConfig(
+            metric_name="accuracy",
+            objective_direction="maximize",
+            backend="xgboost",
+            sampler_config={"name": "TPESampler", "seed": 42},
+            initial_search_space=[ParamSpec(name="max_depth", type="int", low=1, high=15)],
+            improvement_criteria=ImprovementCriteria(mode="strict_better"),
+            stop_conditions=StopConditions(patience_rounds=3),
+            trials_per_round=50,
+            dataset="breast_cancer",
+        )
+        campaign = service.create_campaign("strip-test", config)
+        # Transition campaign to RUNNING
+        service.transition_campaign(campaign["id"], CampaignState.RUNNING)
+        # Transition round through to AWAITING_AGENT and write summary
+        rounds = service.get_rounds(campaign["id"])
+        round_id = rounds[0]["id"]
+        service.transition_round(round_id, RoundState.RUNNING)
+        service.transition_round(round_id, RoundState.SUMMARIZING)
+        service.write_summary(round_id, self.SUMMARY_WITH_TEST_SCORE)
+        service.transition_round(round_id, RoundState.AWAITING_AGENT)
+        return campaign
+
+    def test_get_round_summary_strips_test_score_for_active(self, db, active_campaign):
+        result = handle_get_round_summary(db, "strip-test")
+        summary = result["summary"]
+        if isinstance(summary, str):
+            summary = json.loads(summary)
+        assert "test_score" not in summary
+        assert summary["best_score"] == 0.95
+
+    def test_get_campaign_status_strips_test_score_for_active(self, db, active_campaign):
+        result = handle_get_campaign_status(db, "strip-test")
+        summary = result["latest_round"]["summary"]
+        if isinstance(summary, str):
+            summary = json.loads(summary)
+        assert "test_score" not in summary
+
+    def test_get_campaign_history_strips_test_score_for_active(self, db, active_campaign):
+        result = handle_get_campaign_history(db, "strip-test")
+        for round_row in result["rounds"]:
+            summary = round_row.get("summary")
+            if summary is not None:
+                if isinstance(summary, str):
+                    summary = json.loads(summary)
+                assert "test_score" not in summary
+
+    def test_get_round_summary_keeps_test_score_for_completed(self, db, service, active_campaign):
+        service.transition_campaign(active_campaign["id"], CampaignState.COMPLETED,
+                                    termination_reason="max_rounds")
+        result = handle_get_round_summary(db, "strip-test")
+        summary = result["summary"]
+        if isinstance(summary, str):
+            summary = json.loads(summary)
+        assert "test_score" in summary
+        assert summary["test_score"] == 0.93
+
+    def test_get_campaign_status_keeps_test_score_for_completed(self, db, service, active_campaign):
+        service.transition_campaign(active_campaign["id"], CampaignState.COMPLETED,
+                                    termination_reason="max_rounds")
+        result = handle_get_campaign_status(db, "strip-test")
+        summary = result["latest_round"]["summary"]
+        if isinstance(summary, str):
+            summary = json.loads(summary)
+        assert "test_score" in summary
+        assert summary["test_score"] == 0.93
+
+    def test_get_campaign_history_keeps_test_score_for_completed(self, db, service, active_campaign):
+        service.transition_campaign(active_campaign["id"], CampaignState.COMPLETED,
+                                    termination_reason="max_rounds")
+        result = handle_get_campaign_history(db, "strip-test")
+        for round_row in result["rounds"]:
+            summary = round_row.get("summary")
+            if summary is not None:
+                if isinstance(summary, str):
+                    summary = json.loads(summary)
+                assert "test_score" in summary

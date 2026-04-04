@@ -4,7 +4,9 @@ This project uses Claude Code as the LLM agent that drives hyperparameter optimi
 
 ## Setup
 
-Postgres must be running: `docker compose up -d`
+Postgres and MLflow must be running: `docker compose up -d`
+
+MLflow UI is at http://localhost:5001. To enable MLflow tracking, set `MLFLOW_TRACKING_URI=http://localhost:5001`.
 
 ## Your MCP tools
 
@@ -28,21 +30,30 @@ uv run agentune init <name> --backend <backend> --metric <metric> --direction <m
 ```
 
 Available backends: `xgboost`, `lightgbm`, `catboost`
-Available datasets: `breast_cancer`, `california_housing`, `digits`, `covertype`, `credit_g`, `phoneme`
+Available datasets: `breast_cancer`, `california_housing`, `digits`, `covertype`, `credit_g`, `phoneme`, `store_sales`, `rossmann`
 
-### 2. Run the autonomous loop (MCP)
+### 2. Run the campaign (single trigger)
 
-Use your MCP tools to drive the campaign to completion:
+When the user says "run campaign X" or "optimize X", run the **entire campaign autonomously** using this loop. Do not wait for user input between rounds.
 
-1. Call `get_tuning_guide` with the campaign's backend — read it to understand param roles, interactions, and diagnostic patterns
-2. Call `run_next_round` to execute the next round
-3. Call `get_round_summary` to read results
-4. **Diagnose** using the tuning guide: match the summary signals (param importance, plateau, generalization gap) to the guide's diagnostic patterns
-5. Call `submit_action_proposal` with your decision
-6. Repeat from step 2 until the campaign reaches a terminal state (COMPLETED, FAILED, STOPPED)
+**Setup (once):**
+1. Call `get_campaign_status` to get the backend name and current state
+2. Call `get_tuning_guide` with the backend — read it to understand param roles, interactions, and diagnostic patterns
+3. Tell the user: "Running campaign. Progress visible at `reports/<name>-report.html` — refresh anytime."
 
-If `run_next_round` returns `status: "COMPLETED"`, the campaign hit a hard stop — no more decisions needed.
-If it returns `status: "AWAITING_AGENT"`, read the summary and decide.
+**Loop (repeat until terminal):**
+1. Call `run_next_round` — this executes trials, summarizes, checks stops, **and auto-updates the HTML report**
+2. If `status: "COMPLETED"` → campaign hit a hard stop. Tell the user the final result and report path. Done.
+3. If `status: "FAILED"` → tell the user what failed. Done.
+4. If `status: "AWAITING_AGENT"` → continue to step 5
+5. Call `get_round_summary` to read results
+6. **Diagnose** using the tuning guide: match the summary signals (param importance, plateau, generalization gap) to the guide's diagnostic patterns
+7. Call `submit_action_proposal` with your decision
+8. Go to step 1
+
+**Important:** Keep output minimal. After each round, print **one status line**: `Round N/max: metric=score (delta)`. Don't narrate your reasoning — the HTML report and decision log capture everything. Only elaborate at the end (final result) or if something unexpected happens (failure, rejection).
+
+The `run_next_round` response includes a `report_path` field — this is the auto-generated HTML report updated after every round.
 
 ## Decision framework
 

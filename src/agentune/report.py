@@ -36,6 +36,21 @@ def _fmt_pct(value: float | None) -> str:
     return f"{value:.1%}"
 
 
+def _fmt_gen_gap(gap: float | None, best_score: float | None) -> str:
+    """Format generalization gap as a relative percentage of best_score.
+
+    The raw gap is an absolute difference (e.g. 46.16 for RMSE ~205).
+    Displaying it via _fmt_pct would give nonsensical "4615.9%".
+    Instead, compute gap / |best_score| * 100 for a meaningful percentage.
+    """
+    if gap is None:
+        return "—"
+    if best_score is None or best_score == 0:
+        return _fmt_score(gap)
+    relative = gap / abs(best_score)
+    return f"{relative:.1%}"
+
+
 def _build_decision_context(d: dict) -> str:
     """Build HTML showing what the agent observed before making this decision."""
     summary = d.get("summary", {})
@@ -74,8 +89,15 @@ def _build_decision_context(d: dict) -> str:
         signals.append('<span class="signal-warn">Plateau detected</span> (no improvement in last 30% of trials)')
 
     if gen_gap is not None:
-        gap_class = "signal-warn" if gen_gap > 0.1 else "signal-good"
-        signals.append(f'Generalization gap: <span class="{gap_class}">{gen_gap:.4f}</span>')
+        # Compute relative gap for threshold and display
+        if best_score is not None and best_score != 0:
+            relative_gap = gen_gap / abs(best_score)
+            gap_class = "signal-warn" if relative_gap > 0.1 else "signal-good"
+            gap_display = f"{relative_gap:.1%}"
+        else:
+            gap_class = "signal-good"
+            gap_display = _fmt_score(gen_gap)
+        signals.append(f'Generalization gap: <span class="{gap_class}">{gap_display}</span>')
 
     # Param importance
     if top_params:
@@ -191,6 +213,113 @@ def _build_space_change_html(d: dict) -> str:
             </div>"""
 
 
+def _build_status_banner(campaign: dict, rounds: list[dict]) -> str:
+    """Build a live status banner showing campaign progress."""
+    state = campaign["state"]
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    completed_rounds = sum(1 for r in rounds if r.get("summary"))
+    max_rounds = None
+    stop_cond = campaign.get("stop_conditions")
+    if stop_cond:
+        sc = _load_json(stop_cond) if isinstance(stop_cond, str) else stop_cond
+        max_rounds = sc.get("max_rounds")
+
+    rounds_str = f"Round {completed_rounds}"
+    if max_rounds:
+        rounds_str += f" of {max_rounds}"
+    rounds_str += " completed"
+
+    if state in ("RUNNING", "AWAITING_AGENT", "CREATED"):
+        banner_class = "banner-running"
+        icon = "&#9654;"  # play
+        label = f"Campaign in progress &mdash; {rounds_str}"
+    elif state == "COMPLETED":
+        banner_class = "banner-completed"
+        icon = "&#10003;"  # checkmark
+        reason = campaign.get("termination_reason", "")
+        label = f"Campaign completed &mdash; {rounds_str}"
+        if reason:
+            label += f" &mdash; {reason}"
+    elif state in ("FAILED",):
+        banner_class = "banner-failed"
+        icon = "&#10007;"  # x
+        label = f"Campaign failed &mdash; {rounds_str}"
+        detail = campaign.get("termination_detail", "")
+        if detail:
+            label += f" &mdash; {detail[:80]}"
+    elif state in ("STOPPED", "PAUSED", "PAUSE_REQUESTED"):
+        banner_class = "banner-stopped"
+        icon = "&#9724;"  # stop
+        label = f"Campaign {state.lower()} &mdash; {rounds_str}"
+    else:
+        banner_class = "banner-running"
+        icon = "&#9654;"
+        label = f"{state} &mdash; {rounds_str}"
+
+    return f"""
+    <div class="status-banner {banner_class}">
+        <span class="banner-icon">{icon}</span>
+        <span class="banner-label">{label}</span>
+        <span class="banner-time">Last updated: {now}</span>
+    </div>"""
+
+
+def _build_progress_timeline(campaign: dict, rounds: list[dict], decisions: list[dict]) -> str:
+    """Build a visual progress timeline with dots for each round."""
+    stop_cond = campaign.get("stop_conditions")
+    max_rounds = None
+    if stop_cond:
+        sc = _load_json(stop_cond) if isinstance(stop_cond, str) else stop_cond
+        max_rounds = sc.get("max_rounds")
+
+    # Build action map: round_number -> action taken
+    action_map = {}
+    for d in decisions:
+        if d.get("accepted", True):
+            action_map[d["round"]] = d["action"]
+
+    completed_rounds = [r for r in rounds if r.get("summary")]
+    n_completed = len(completed_rounds)
+    total_dots = max(max_rounds or n_completed, n_completed)
+
+    state = campaign["state"]
+    is_running = state in ("RUNNING", "AWAITING_AGENT", "CREATED")
+
+    dots = ""
+    for i in range(1, total_dots + 1):
+        if i <= n_completed:
+            # Completed round
+            action = action_map.get(i, "")
+            action_label = f'<span class="tl-action">{action}</span>' if action else ""
+            dots += f"""
+            <div class="tl-step completed">
+                <div class="tl-dot completed"></div>
+                <div class="tl-label">R{i}</div>
+                {action_label}
+            </div>"""
+        elif i == n_completed + 1 and is_running:
+            # Current round (pulsing)
+            dots += f"""
+            <div class="tl-step current">
+                <div class="tl-dot current"></div>
+                <div class="tl-label">R{i}</div>
+                <span class="tl-action">in progress</span>
+            </div>"""
+        else:
+            # Future round
+            dots += f"""
+            <div class="tl-step future">
+                <div class="tl-dot future"></div>
+                <div class="tl-label">R{i}</div>
+            </div>"""
+
+    return f"""
+    <div class="timeline-container">
+        <div class="timeline-track">{dots}</div>
+    </div>"""
+
+
 def generate_report(db: Database, campaign_name: str) -> str:
     """Generate a self-contained HTML report for a campaign."""
     service = CampaignService(db)
@@ -293,7 +422,7 @@ def _render_html(campaign: dict, rounds: list[dict], decisions: list[dict]) -> s
             <td>{_fmt_time(s.get('round_wall_time_seconds'))}</td>
             <td>{'Yes' if s.get('plateau_signal') else 'No'}</td>
             <td class="param-col">{top_str}</td>
-            <td>{_fmt_pct(s.get('generalization_gap'))}</td>
+            <td>{_fmt_gen_gap(s.get('generalization_gap'), s.get('best_score'))}</td>
             <td>{action_str}</td>
         </tr>"""
 
@@ -340,6 +469,10 @@ def _render_html(campaign: dict, rounds: list[dict], decisions: list[dict]) -> s
 
     # Build search space evolution
     space_html = _build_search_space_evolution(rounds)
+
+    # Build status banner and progress timeline
+    banner_html = _build_status_banner(campaign, rounds)
+    timeline_html = _build_progress_timeline(campaign, rounds, decisions)
 
     created = campaign.get("created_at", "")
     if isinstance(created, datetime):
@@ -429,12 +562,41 @@ def _render_html(campaign: dict, rounds: list[dict], decisions: list[dict]) -> s
   .param-badge.added {{ border-color: var(--green); color: var(--green); }}
   .param-badge.dropped {{ border-color: var(--red); color: var(--red); text-decoration: line-through; }}
   footer {{ margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.75rem; text-align: center; }}
+  /* Status banner */
+  .status-banner {{ display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1.25rem; border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.9rem; }}
+  .banner-running {{ background: rgba(88,166,255,0.1); border: 1px solid var(--accent); }}
+  .banner-completed {{ background: rgba(63,185,80,0.1); border: 1px solid var(--green); }}
+  .banner-failed {{ background: rgba(248,81,73,0.1); border: 1px solid var(--red); }}
+  .banner-stopped {{ background: rgba(210,153,34,0.1); border: 1px solid var(--orange); }}
+  .banner-icon {{ font-size: 1.1rem; }}
+  .banner-running .banner-icon {{ color: var(--accent); }}
+  .banner-completed .banner-icon {{ color: var(--green); }}
+  .banner-failed .banner-icon {{ color: var(--red); }}
+  .banner-stopped .banner-icon {{ color: var(--orange); }}
+  .banner-label {{ flex: 1; }}
+  .banner-time {{ font-size: 0.75rem; color: var(--text-muted); }}
+  /* Progress timeline */
+  .timeline-container {{ background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem 1.5rem; margin-bottom: 2rem; overflow-x: auto; }}
+  .timeline-track {{ display: flex; align-items: flex-start; gap: 0; position: relative; min-width: max-content; }}
+  .tl-step {{ display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 70px; position: relative; }}
+  .tl-step:not(:last-child)::after {{ content: ''; position: absolute; top: 9px; left: calc(50% + 12px); right: calc(-50% + 12px); height: 2px; background: var(--border); z-index: 0; }}
+  .tl-step.completed:not(:last-child)::after {{ background: var(--accent); }}
+  .tl-dot {{ width: 18px; height: 18px; border-radius: 50%; z-index: 1; border: 2px solid var(--border); background: var(--bg); }}
+  .tl-dot.completed {{ background: var(--accent); border-color: var(--accent); }}
+  .tl-dot.current {{ background: var(--bg); border-color: var(--accent); animation: pulse-dot 1.5s ease-in-out infinite; }}
+  .tl-dot.future {{ background: var(--bg); border-color: var(--border); }}
+  @keyframes pulse-dot {{ 0%, 100% {{ box-shadow: 0 0 0 0 rgba(88,166,255,0.4); }} 50% {{ box-shadow: 0 0 0 6px rgba(88,166,255,0); }} }}
+  .tl-label {{ font-size: 0.7rem; color: var(--text-muted); margin-top: 0.4rem; }}
+  .tl-action {{ font-size: 0.6rem; color: var(--accent); margin-top: 0.15rem; max-width: 70px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  .tl-step.current .tl-action {{ color: var(--orange); }}
 </style>
 </head>
 <body>
 
 <h1>Agentune Report</h1>
 <div class="subtitle">{name} &mdash; {created}</div>
+
+{banner_html}
 
 <div class="overview">
   <div class="card">
@@ -470,6 +632,8 @@ def _render_html(campaign: dict, rounds: list[dict], decisions: list[dict]) -> s
     <div class="card-value">{campaign.get('termination_reason', '—')}</div>
   </div>
 </div>
+
+{timeline_html}
 
 <h2>Score Progression</h2>
 {chart_html}

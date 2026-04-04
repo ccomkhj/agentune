@@ -13,4 +13,20 @@ venv/
 .pytest_cache/
 .coverage
 htmlcov/
-docs/superpowers/
+docs/
+
+# OS
+.DS_Store
+
+# ML artifacts
+catboost_info/
+reports/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+
+# Claude Code local settings
+.claude/settings.local.json
+.mcp.json
