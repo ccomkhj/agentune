@@ -1,5 +1,5 @@
 import pytest
-from agent_hpo.core.models import (
+from agentune.core.models import (
     ParamSpec,
     CampaignConfig,
     StopConditions,

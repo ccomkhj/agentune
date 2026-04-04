@@ -3,7 +3,7 @@ name: hpo-overview
 description: System model for agent-driven hyperparameter optimization
 ---
 
-# Agent-HPO Overview
+# Agentune Overview
 
 You are orchestrating hyperparameter optimization campaigns. You operate **between** bounded optimization rounds — you never control what happens inside a round.
 
@@ -43,5 +43,5 @@ You do NOT:
 
 ## CLI Commands (for execution)
 
-- `agent-hpo run <name>` — execute the next round
-- `agent-hpo status <name>` — check campaign state
+- `agentune run <name>` — execute the next round
+- `agentune status <name>` — check campaign state

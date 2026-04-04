@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent_hpo.core.models import (
+from agentune.core.models import (
     ImprovementCriteria,
     RoundSummary,
     StopConditions,

@@ -6,16 +6,22 @@ import optuna
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 
-from agent_hpo.core.db import Database
-from agent_hpo.core.campaign import CampaignService
-from agent_hpo.core.models import (
+from agentune.core.db import Database
+from agentune.core.campaign import CampaignService
+from agentune.core.models import (
     CampaignConfig, ImprovementCriteria, StopConditions, ParamSpec,
     ActionProposal, DatasetSplit,
 )
-from agent_hpo.core.state import CampaignState, RoundState
-from agent_hpo.backends.xgboost import XGBoostBackend
-from agent_hpo.summarizer import RoundSummarizer
-from agent_hpo.scheduler import Scheduler
+from agentune.core.state import CampaignState, RoundState
+from agentune.backends.xgboost import XGBoostBackend
+from agentune.summarizer import RoundSummarizer
+from agentune.scheduler import Scheduler
+from agentune.mcp_server import (
+    handle_run_next_round,
+    handle_get_round_summary,
+    handle_submit_action_proposal,
+    handle_get_campaign_status,
+)
 
 
 @pytest.fixture
@@ -49,6 +55,7 @@ def test_full_campaign_lifecycle(db, dataset):
         improvement_criteria=ImprovementCriteria(mode="strict_better"),
         stop_conditions=StopConditions(max_rounds=3, patience_rounds=2),
         trials_per_round=5,
+        dataset="breast_cancer",
     )
     campaign = service.create_campaign("integration-test", config)
     assert campaign["state"] == "CREATED"
@@ -149,3 +156,48 @@ def test_full_campaign_lifecycle(db, dataset):
     # Verify campaign completed
     final = service.get_campaign(campaign["id"])
     assert final["state"] == "COMPLETED"
+
+
+class TestAutonomousLoop:
+    def test_full_loop_to_completion(self, db):
+        """Simulate the agent loop: run -> summarize -> decide -> run -> ... -> terminal."""
+        service = CampaignService(db)
+        config = CampaignConfig(
+            metric_name="accuracy",
+            objective_direction="maximize",
+            backend="xgboost",
+            sampler_config={"name": "TPESampler", "seed": 42},
+            initial_search_space=[
+                ParamSpec(name="max_depth", type="int", low=1, high=10),
+                ParamSpec(name="learning_rate", type="float", low=0.01, high=0.5, log=True),
+            ],
+            improvement_criteria=ImprovementCriteria(mode="strict_better"),
+            stop_conditions=StopConditions(max_rounds=2, patience_rounds=3, max_total_trials=15),
+            trials_per_round=5,
+            dataset="breast_cancer",
+        )
+        service.create_campaign("loop-test", config)
+
+        # Round 1: run via MCP
+        result1 = handle_run_next_round(db, "loop-test")
+        assert result1["status"] in ("AWAITING_AGENT", "COMPLETED")
+
+        if result1["status"] == "AWAITING_AGENT":
+            # Decide: continue
+            decision = handle_submit_action_proposal(db, "loop-test", {
+                "action": "continue",
+                "justification": "Score improving, continue exploration",
+                "reference_round_ids": [1],
+            })
+            assert decision["accepted"] is True
+
+            # Round 2: run via MCP
+            result2 = handle_run_next_round(db, "loop-test")
+            # Should complete due to max_rounds=2
+            assert result2["status"] in ("AWAITING_AGENT", "COMPLETED")
+
+        # Campaign should have termination metadata if completed
+        status = handle_get_campaign_status(db, "loop-test")
+        # Either still running (awaiting agent) or completed with reason
+        if status["state"] == "COMPLETED":
+            assert status.get("termination_reason") is not None

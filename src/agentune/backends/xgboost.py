@@ -1,4 +1,4 @@
-"""XGBoost backend for agent-hpo."""
+"""XGBoost backend for agentune."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import optuna
 import xgboost as xgb
 from sklearn.metrics import accuracy_score, mean_squared_error, log_loss
 
-from agent_hpo.backends.base import suggest_from_param_spec
-from agent_hpo.core.models import DatasetSplit, ParamSpec
+from agentune.backends.base import suggest_from_param_spec
+from agentune.core.models import DatasetSplit, ParamSpec
 
 METRICS = {
     "accuracy": (accuracy_score, False),
@@ -56,12 +56,15 @@ class XGBoostBackend:
         return objective
 
     def default_search_space(self) -> list[ParamSpec]:
-        return self._param_defs()
+        return self._default_params()
+
+    def available_params(self) -> list[ParamSpec]:
+        return self._all_params()
 
     def param_definitions(self) -> list[ParamSpec]:
-        return self._param_defs()
+        return self._all_params()
 
-    def _param_defs(self) -> list[ParamSpec]:
+    def _default_params(self) -> list[ParamSpec]:
         return [
             ParamSpec(name="max_depth", type="int", low=1, high=15),
             ParamSpec(name="learning_rate", type="float", low=0.001, high=1.0, log=True),
@@ -72,4 +75,14 @@ class XGBoostBackend:
             ParamSpec(name="gamma", type="float", low=0.0, high=5.0),
             ParamSpec(name="reg_alpha", type="float", low=1e-8, high=10.0, log=True),
             ParamSpec(name="reg_lambda", type="float", low=1e-8, high=10.0, log=True),
+        ]
+
+    def _all_params(self) -> list[ParamSpec]:
+        return self._default_params() + [
+            ParamSpec(name="max_leaves", type="int", low=0, high=256),
+            ParamSpec(name="max_bin", type="int", low=64, high=512),
+            ParamSpec(name="colsample_bylevel", type="float", low=0.3, high=1.0),
+            ParamSpec(name="colsample_bynode", type="float", low=0.3, high=1.0),
+            ParamSpec(name="scale_pos_weight", type="float", low=0.5, high=10.0),
+            ParamSpec(name="grow_policy", type="categorical", choices=["depthwise", "lossguide"]),
         ]

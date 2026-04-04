@@ -8,9 +8,9 @@ import time
 import click
 import optuna
 
-from agent_hpo.datasets import load_dataset, DATASETS
-from agent_hpo.backends.xgboost import XGBoostBackend
-from agent_hpo.core.models import ParamSpec
+from agentune.datasets import load_dataset, DATASETS
+from agentune.backends.xgboost import XGBoostBackend
+from agentune.core.models import ParamSpec
 
 
 @click.command()

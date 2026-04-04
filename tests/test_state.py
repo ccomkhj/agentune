@@ -1,5 +1,5 @@
 import pytest
-from agent_hpo.core.state import (
+from agentune.core.state import (
     CampaignState,
     RoundState,
     InvalidTransitionError,

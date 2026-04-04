@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS campaigns (
     improvement_criteria JSONB NOT NULL,
     stop_conditions JSONB NOT NULL,
     trials_per_round INT NOT NULL,
+    dataset         TEXT,
+    split_seed      INT NOT NULL DEFAULT 42,
+    termination_reason TEXT,
+    termination_detail TEXT,
     claimed_by      TEXT,
     claim_expires_at TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -47,6 +51,22 @@ CREATE TABLE IF NOT EXISTS study_rounds (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(campaign_id, round_number)
 );
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'campaigns' AND column_name = 'dataset') THEN
+        ALTER TABLE campaigns ADD COLUMN dataset TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'campaigns' AND column_name = 'split_seed') THEN
+        ALTER TABLE campaigns ADD COLUMN split_seed INT NOT NULL DEFAULT 42;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'campaigns' AND column_name = 'termination_reason') THEN
+        ALTER TABLE campaigns ADD COLUMN termination_reason TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'campaigns' AND column_name = 'termination_detail') THEN
+        ALTER TABLE campaigns ADD COLUMN termination_detail TEXT;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS agent_decisions (
     id              SERIAL PRIMARY KEY,

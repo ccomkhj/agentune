@@ -1,4 +1,4 @@
-"""Data models for agent-hpo campaigns, rounds, summaries, and proposals."""
+"""Data models for agentune campaigns, rounds, summaries, and proposals."""
 
 from __future__ import annotations
 
@@ -113,6 +113,8 @@ class CampaignConfig:
     improvement_criteria: ImprovementCriteria
     stop_conditions: StopConditions
     trials_per_round: int
+    dataset: str
+    split_seed: int = 42
 
 
 @dataclass
@@ -179,7 +181,7 @@ class RoundSummary:
 class ActionProposal:
     """Agent's proposed next action after reviewing a round summary."""
 
-    action: Literal["continue", "narrow_search", "widen_search", "increase_budget", "stop"]
+    action: Literal["continue", "narrow_search", "widen_search", "increase_budget", "revise_search", "stop"]
     justification: str
     proposed_search_space: list[dict] | None = None
     proposed_budget: int | None = None
@@ -187,7 +189,7 @@ class ActionProposal:
     reasoning: dict | None = None
 
     def validate(self) -> None:
-        if self.action in ("narrow_search", "widen_search") and not self.proposed_search_space:
+        if self.action in ("narrow_search", "widen_search", "revise_search") and not self.proposed_search_space:
             raise ValueError(
                 f"Action '{self.action}' requires proposed_search_space"
             )

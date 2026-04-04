@@ -13,5 +13,5 @@ def get_backend(name: str) -> type:
     return BACKEND_REGISTRY[name]
 
 
-from agent_hpo.backends.xgboost import XGBoostBackend
+from agentune.backends.xgboost import XGBoostBackend
 register_backend("xgboost", XGBoostBackend)

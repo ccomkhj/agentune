@@ -3,8 +3,8 @@ import pytest
 import psycopg
 
 TEST_DB_URL = os.environ.get(
-    "AGENT_HPO_TEST_DB_URL",
-    "postgresql://agent_hpo:agent_hpo@localhost:5432/agent_hpo_test",
+    "AGENTUNE_TEST_DB_URL",
+    "postgresql://agentune:agentune@localhost:5432/agentune_test",
 )
 
 

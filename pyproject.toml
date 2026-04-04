@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agent-hpo"
+name = "agentune"
 version = "0.1.0"
 description = "Agent-driven hyperparameter optimization with Optuna"
 requires-python = ">=3.11"
@@ -25,10 +25,10 @@ dev = [
 ]
 
 [project.scripts]
-agent-hpo = "agent_hpo.cli:cli"
+agentune = "agentune.cli:cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_hpo"]
+packages = ["src/agentune"]
 
 [dependency-groups]
 dev = [
@@ -37,4 +37,4 @@ dev = [
 ]
 
 [tool.hatch.build]
-artifacts = ["src/agent_hpo/skills/*.md"]
+artifacts = ["src/agentune/skills/*.md"]

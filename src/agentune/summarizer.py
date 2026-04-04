@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any
 
 import optuna
 from optuna.trial import TrialState
 
-from agent_hpo.core.models import RoundSummary
+from agentune.core.models import RoundSummary
 
 
 class RoundSummarizer:
@@ -99,12 +100,9 @@ class RoundSummarizer:
 
         # Parameter importance (best effort)
         param_importance = {}
-        try:
-            if completed_trials >= 4:
-                importance = optuna.importance.get_param_importances(study)
-                param_importance = dict(importance)
-        except Exception:
-            pass
+        if completed_trials >= 4:
+            with suppress(Exception):
+                param_importance = dict(optuna.importance.get_param_importances(study))
 
         # Parameter ranges used in this round
         param_ranges = {}

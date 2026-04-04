@@ -12,20 +12,20 @@ Usage:
 import json
 import sys
 
-from agent_hpo.agent import AgentReasoner
-from agent_hpo.core.campaign import CampaignService
-from agent_hpo.core.db import Database
-from agent_hpo.core.models import (
+from agentune.agent import AgentReasoner
+from agentune.core.campaign import CampaignService
+from agentune.core.db import Database
+from agentune.core.models import (
     CampaignConfig,
     ImprovementCriteria,
     RoundSummary,
     StopConditions,
 )
-from agent_hpo.backends.xgboost import XGBoostBackend
-from agent_hpo.datasets import load_dataset
-from agent_hpo.runner import RoundRunner
+from agentune.backends.xgboost import XGBoostBackend
+from agentune.datasets import load_dataset
+from agentune.runner import RoundRunner
 
-DB_URL = "postgresql://agent_hpo:agent_hpo@localhost:5432/agent_hpo"
+DB_URL = "postgresql://agentune:agentune@localhost:5432/agentune"
 CAMPAIGN_NAME = "california-housing-agent-demo"
 
 
@@ -142,7 +142,7 @@ def main():
         if not result_decision["accepted"]:
             print(f"\n  PROPOSAL REJECTED: {result_decision['rejection_reason']}")
             print("  Falling back to 'continue'...")
-            from agent_hpo.core.models import ActionProposal
+            from agentune.core.models import ActionProposal
             fallback = ActionProposal(
                 action="continue",
                 justification=f"Fallback after rejection: {result_decision['rejection_reason']}",

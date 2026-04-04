@@ -5,7 +5,7 @@ from __future__ import annotations
 from sklearn.datasets import load_breast_cancer, fetch_california_housing, load_digits
 from sklearn.model_selection import train_test_split
 
-from agent_hpo.core.models import DatasetSplit
+from agentune.core.models import DatasetSplit
 
 DATASETS = {
     "breast_cancer": {"loader": load_breast_cancer, "metric": "accuracy", "direction": "maximize"},

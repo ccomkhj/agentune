@@ -1,11 +1,11 @@
 {
   "mcpServers": {
-    "agent-hpo": {
+    "agentune": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "python", "-m", "agent_hpo.mcp_server"],
+      "args": ["run", "python", "-m", "agentune.mcp_server"],
       "env": {
-        "AGENT_HPO_DB_URL": "postgresql://agent_hpo:agent_hpo@localhost:5432/agent_hpo"
+        "AGENTUNE_DB_URL": "postgresql://agentune:agentune@localhost:5432/agentune"
       }
     }
   }

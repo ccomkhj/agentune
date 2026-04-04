@@ -1,8 +1,8 @@
 import pytest
 import optuna
 
-from agent_hpo.scheduler import Scheduler
-from agent_hpo.core.models import (
+from agentune.scheduler import Scheduler
+from agentune.core.models import (
     CampaignConfig, ImprovementCriteria, StopConditions, ParamSpec, RoundSummary,
 )
 

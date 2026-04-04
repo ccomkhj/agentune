@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 
-from agent_hpo.core.db import Database
+from agentune.core.db import Database
 
 LEASE_DURATION = timedelta(minutes=15)
 REFRESH_INTERVAL = timedelta(minutes=5)

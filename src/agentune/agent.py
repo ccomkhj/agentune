@@ -9,15 +9,12 @@ The agent follows a strict observe → diagnose → decide → justify pipeline.
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from agent_hpo.core.models import (
+from agentune.core.models import (
     ActionProposal,
     RoundSummary,
-    ParamSpec,
-    StopConditions,
 )
 
 
@@ -242,6 +239,22 @@ class AgentReasoner:
     DOMINANT_PARAM_THRESHOLD = 0.30
     BOUNDARY_FRACTION = 0.05  # param is "at boundary" if within 5% of range edge
 
+    def _is_at_boundary(self, best_value: float, low: float, high: float) -> bool:
+        range_size = high - low if high != low else 1
+        if range_size <= 0:
+            return False
+        return (
+            abs(best_value - low) / range_size < self.BOUNDARY_FRACTION
+            or abs(best_value - high) / range_size < self.BOUNDARY_FRACTION
+        )
+
+    def _narrowing_strategy(self, importance: float) -> tuple[float, str]:
+        if importance >= 0.20:
+            return 0.4, f"importance={importance:.1%}, focusing tightly"
+        if importance >= 0.05:
+            return 0.6, f"importance={importance:.1%}, moderate narrowing"
+        return 0.8, f"importance={importance:.1%}, slight narrowing"
+
     def observe(self, summary: RoundSummary, round_number: int) -> Observation:
         """Extract raw signals from a round summary."""
         top_params = sorted(
@@ -269,7 +282,7 @@ class AgentReasoner:
             convergence_curve=summary.convergence_curve,
         )
 
-    def diagnose(self, obs: Observation, prev_obs: Observation | None = None) -> Diagnosis:
+    def diagnose(self, obs: Observation) -> Diagnosis:
         """Interpret observations into a diagnosis."""
         reasons = []
 
@@ -342,13 +355,10 @@ class AgentReasoner:
         at_boundary = []
         for name, (lo, hi) in obs.param_ranges_used.items():
             best_val = obs.best_params.get(name)
-            if best_val is not None and isinstance(best_val, (int, float)):
-                range_size = hi - lo if hi != lo else 1
-                if range_size > 0:
-                    if abs(best_val - lo) / range_size < self.BOUNDARY_FRACTION:
-                        at_boundary.append(name)
-                    elif abs(best_val - hi) / range_size < self.BOUNDARY_FRACTION:
-                        at_boundary.append(name)
+            if best_val is None or not isinstance(best_val, (int, float)):
+                continue
+            if self._is_at_boundary(float(best_val), lo, hi):
+                at_boundary.append(name)
         if at_boundary:
             reasons.append(f"Best params near range boundary: {', '.join(at_boundary)}")
 
@@ -376,10 +386,7 @@ class AgentReasoner:
     ) -> AgentDecision:
         """Main entry point: observe, diagnose, decide, justify."""
         obs = self.observe(summary, round_number)
-        prev_obs = None
-        if prev_summaries:
-            prev_obs = self.observe(prev_summaries[-1], round_number - 1)
-        diag = self.diagnose(obs, prev_obs)
+        diag = self.diagnose(obs)
 
         # Collect all reference round IDs
         ref_ids = [obs.round_id]
@@ -438,7 +445,7 @@ class AgentReasoner:
 
         # First round → narrow based on observed param importance
         if obs.round_number == 1 and not diag.search_space_exhausted:
-            changes = self._build_narrow_changes(obs, diag, current_space)
+            changes = self._build_narrow_changes(obs, current_space)
             if changes:
                 reason_parts = [
                     f"After {round_ref}: {obs.metric_name}={_fmt(obs.best_score)}",
@@ -488,7 +495,7 @@ class AgentReasoner:
                 )
             else:
                 # Try narrowing
-                changes = self._build_narrow_changes(obs, diag, current_space)
+                changes = self._build_narrow_changes(obs, current_space)
                 if changes:
                     return "narrow_search", changes, None, (
                         f"After {round_ref}: no improvement ({obs.metric_name}={_fmt(obs.best_score)}). "
@@ -520,7 +527,6 @@ class AgentReasoner:
     def _build_narrow_changes(
         self,
         obs: Observation,
-        diag: Diagnosis,
         current_space: list[dict],
     ) -> list[SearchSpaceChange]:
         """Build narrowed search space changes based on best params and importance."""
@@ -544,16 +550,7 @@ class AgentReasoner:
             old_range = old_high - old_low
             is_log = spec.get("log", False)
 
-            # Narrow more aggressively for important params
-            if importance >= 0.20:
-                shrink = 0.4  # keep 40% of range around best
-                reason = f"importance={importance:.1%}, focusing tightly"
-            elif importance >= 0.05:
-                shrink = 0.6  # keep 60% of range
-                reason = f"importance={importance:.1%}, moderate narrowing"
-            else:
-                shrink = 0.8  # keep 80% of range
-                reason = f"importance={importance:.1%}, slight narrowing"
+            shrink, reason = self._narrowing_strategy(importance)
 
             half_new_range = old_range * shrink / 2
             new_low = max(old_low, best_val - half_new_range)

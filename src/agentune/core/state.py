@@ -66,7 +66,7 @@ class RoundState(Enum):
 
 
 ROUND_TRANSITIONS: dict[RoundState, set[RoundState]] = {
-    RoundState.PROPOSED: {RoundState.RUNNING},
+    RoundState.PROPOSED: {RoundState.RUNNING, RoundState.FAILED},
     RoundState.RUNNING: {RoundState.SUMMARIZING, RoundState.FAILED},
     RoundState.SUMMARIZING: {RoundState.AWAITING_AGENT, RoundState.FAILED},
     RoundState.AWAITING_AGENT: {RoundState.RESOLVED, RoundState.CLOSED},

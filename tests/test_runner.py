@@ -1,14 +1,15 @@
 import pytest
+from unittest.mock import patch
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 
-from agent_hpo.runner import RoundRunner, RunResult
-from agent_hpo.core.db import Database
-from agent_hpo.core.campaign import CampaignService
-from agent_hpo.core.models import (
+from agentune.runner import RoundRunner, RunResult
+from agentune.core.db import Database
+from agentune.core.campaign import CampaignService
+from agentune.core.models import (
     CampaignConfig, ImprovementCriteria, StopConditions, ParamSpec, DatasetSplit,
 )
-from agent_hpo.core.state import CampaignState, RoundState
+from agentune.core.state import CampaignState, RoundState
 
 
 @pytest.fixture
@@ -30,7 +31,7 @@ def dataset():
 @pytest.fixture
 def campaign(db):
     service = CampaignService(db)
-    from agent_hpo.backends.xgboost import XGBoostBackend
+    from agentune.backends.xgboost import XGBoostBackend
     backend = XGBoostBackend()
     config = CampaignConfig(
         metric_name="accuracy",
@@ -41,8 +42,30 @@ def campaign(db):
         improvement_criteria=ImprovementCriteria(mode="strict_better"),
         stop_conditions=StopConditions(max_rounds=3, patience_rounds=2, max_total_trials=15),
         trials_per_round=5,
+        dataset="breast_cancer",
     )
     return service.create_campaign("runner-test", config)
+
+
+class TestFailurePath:
+    def test_exception_during_run_marks_round_failed(self, db, dataset, campaign):
+        runner = RoundRunner(db, dataset)
+        service = CampaignService(db)
+
+        with patch.object(runner, '_execute', side_effect=RuntimeError("OOM")):
+            result = runner.run_next_round(campaign["id"])
+
+        assert result.status == "FAILED"
+
+        # Round should be FAILED
+        rounds = service.get_rounds(campaign["id"])
+        assert rounds[0]["state"] == "FAILED"
+
+        # Campaign should be FAILED with termination metadata
+        updated = service.get_campaign(campaign["id"])
+        assert updated["state"] == "FAILED"
+        assert updated["termination_reason"] == "failed"
+        assert "OOM" in updated["termination_detail"]
 
 
 class TestRoundRunner:

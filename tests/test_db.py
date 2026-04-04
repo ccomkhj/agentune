@@ -1,5 +1,5 @@
 import pytest
-from agent_hpo.core.db import Database
+from agentune.core.db import Database
 
 
 @pytest.fixture

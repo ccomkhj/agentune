@@ -1,7 +1,7 @@
 import pytest
 import optuna
-from agent_hpo.summarizer import RoundSummarizer
-from agent_hpo.core.models import RoundSummary
+from agentune.summarizer import RoundSummarizer
+from agentune.core.models import RoundSummary
 
 
 def _make_study_with_trials(n_trials=10, direction="maximize"):

@@ -1,6 +1,6 @@
 import pytest
-from agent_hpo.core.db import Database
-from agent_hpo.core.locking import LeaseManager, LeaseError
+from agentune.core.db import Database
+from agentune.core.locking import LeaseManager, LeaseError
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-# Agent-HPO Implementation Plan
+# Agentune Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11+, Optuna, XGBoost, PostgreSQL, psycopg (v3), Click (CLI), mcp (MCP SDK), scikit-learn (benchmarks), pytest
 
-**Spec:** `docs/superpowers/specs/2026-03-22-agent-hpo-design.md`
+**Spec:** `docs/superpowers/specs/2026-03-22-agentune-design.md`
 
 ---
 
@@ -18,7 +18,7 @@
 agent_param_optimization/
 ├── pyproject.toml
 ├── src/
-│   └── agent_hpo/
+│   └── agentune/
 │       ├── __init__.py
 │       ├── core/
 │       │   ├── __init__.py
@@ -65,9 +65,9 @@ agent_param_optimization/
 
 **Files:**
 - Create: `pyproject.toml`
-- Create: `src/agent_hpo/__init__.py`
-- Create: `src/agent_hpo/core/__init__.py`
-- Create: `src/agent_hpo/backends/__init__.py`
+- Create: `src/agentune/__init__.py`
+- Create: `src/agentune/core/__init__.py`
+- Create: `src/agentune/backends/__init__.py`
 
 - [ ] **Step 1: Create pyproject.toml**
 
@@ -78,7 +78,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agent-hpo"
+name = "agentune"
 version = "0.1.0"
 description = "Agent-driven hyperparameter optimization with Optuna"
 requires-python = ">=3.11"
@@ -98,34 +98,34 @@ dev = [
 ]
 
 [project.scripts]
-agent-hpo = "agent_hpo.cli:cli"
+agentune = "agentune.cli:cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_hpo"]
+packages = ["src/agentune"]
 
 [tool.hatch.build.targets.wheel.shared-data]
 
 [tool.hatch.build.targets.sdist]
 
 [tool.hatch.build]
-artifacts = ["src/agent_hpo/skills/*.md"]
+artifacts = ["src/agentune/skills/*.md"]
 ```
 
 - [ ] **Step 2: Create package init files**
 
-`src/agent_hpo/__init__.py`:
+`src/agentune/__init__.py`:
 ```python
 """Agent-driven hyperparameter optimization with Optuna."""
 
 __version__ = "0.1.0"
 ```
 
-`src/agent_hpo/core/__init__.py`:
+`src/agentune/core/__init__.py`:
 ```python
 """Core service layer: models, state machines, campaign management."""
 ```
 
-`src/agent_hpo/backends/__init__.py`:
+`src/agentune/backends/__init__.py`:
 ```python
 """Model backend registry."""
 
@@ -145,7 +145,7 @@ def get_backend(name: str) -> type:
 - [ ] **Step 3: Install in dev mode and verify**
 
 Run: `cd /Users/huijokim/personal/agent_param_optimization && pip install -e ".[dev]"`
-Expected: Successful install, `agent-hpo --help` shows an error (cli.py doesn't exist yet — that's fine)
+Expected: Successful install, `agentune --help` shows an error (cli.py doesn't exist yet — that's fine)
 
 - [ ] **Step 4: Commit**
 
@@ -159,7 +159,7 @@ git commit -m "feat: project scaffolding with pyproject.toml and package structu
 ### Task 2: Data Models
 
 **Files:**
-- Create: `src/agent_hpo/core/models.py`
+- Create: `src/agentune/core/models.py`
 - Create: `tests/test_models.py`
 
 - [ ] **Step 1: Write tests for data models**
@@ -167,7 +167,7 @@ git commit -m "feat: project scaffolding with pyproject.toml and package structu
 ```python
 # tests/test_models.py
 import pytest
-from agent_hpo.core.models import (
+from agentune.core.models import (
     ParamSpec,
     CampaignConfig,
     StopConditions,
@@ -307,13 +307,13 @@ class TestActionProposal:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/huijokim/personal/agent_param_optimization && python -m pytest tests/test_models.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'agent_hpo.core.models'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'agentune.core.models'`
 
 - [ ] **Step 3: Implement models**
 
 ```python
-# src/agent_hpo/core/models.py
-"""Data models for agent-hpo campaigns, rounds, summaries, and proposals."""
+# src/agentune/core/models.py
+"""Data models for agentune campaigns, rounds, summaries, and proposals."""
 
 from __future__ import annotations
 
@@ -526,7 +526,7 @@ Expected: All tests PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hpo/core/models.py tests/test_models.py
+git add src/agentune/core/models.py tests/test_models.py
 git commit -m "feat: data models with validation and serialization"
 ```
 
@@ -535,7 +535,7 @@ git commit -m "feat: data models with validation and serialization"
 ### Task 3: State Machines
 
 **Files:**
-- Create: `src/agent_hpo/core/state.py`
+- Create: `src/agentune/core/state.py`
 - Create: `tests/test_state.py`
 
 - [ ] **Step 1: Write tests for state transitions**
@@ -543,7 +543,7 @@ git commit -m "feat: data models with validation and serialization"
 ```python
 # tests/test_state.py
 import pytest
-from agent_hpo.core.state import (
+from agentune.core.state import (
     CampaignState,
     RoundState,
     InvalidTransitionError,
@@ -642,7 +642,7 @@ Expected: FAIL — `ModuleNotFoundError`
 - [ ] **Step 3: Implement state machines**
 
 ```python
-# src/agent_hpo/core/state.py
+# src/agentune/core/state.py
 """Campaign and round state machines with validated transitions."""
 
 from __future__ import annotations
@@ -741,7 +741,7 @@ Expected: All tests PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hpo/core/state.py tests/test_state.py
+git add src/agentune/core/state.py tests/test_state.py
 git commit -m "feat: campaign and round state machines with transition validation"
 ```
 
@@ -750,18 +750,18 @@ git commit -m "feat: campaign and round state machines with transition validatio
 ### Task 4: Database Layer
 
 **Files:**
-- Create: `src/agent_hpo/core/db.py`
+- Create: `src/agentune/core/db.py`
 - Create: `tests/conftest.py`
 - Create: `tests/test_db.py`
 
-**Prerequisites:** A running Postgres instance. Tests use a `agent_hpo_test` database.
+**Prerequisites:** A running Postgres instance. Tests use a `agentune_test` database.
 
 - [ ] **Step 1: Write tests for DB layer**
 
 ```python
 # tests/test_db.py
 import pytest
-from agent_hpo.core.db import Database
+from agentune.core.db import Database
 
 
 @pytest.fixture
@@ -804,8 +804,8 @@ import pytest
 import psycopg
 
 TEST_DB_URL = os.environ.get(
-    "AGENT_HPO_TEST_DB_URL",
-    "postgresql://localhost:5432/agent_hpo_test",
+    "AGENTUNE_TEST_DB_URL",
+    "postgresql://localhost:5432/agentune_test",
 )
 
 
@@ -841,7 +841,7 @@ Expected: FAIL — `ModuleNotFoundError`
 - [ ] **Step 4: Implement database layer**
 
 ```python
-# src/agent_hpo/core/db.py
+# src/agentune/core/db.py
 """Database connection pool and schema management."""
 
 from __future__ import annotations
@@ -950,7 +950,7 @@ Expected: All tests PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/agent_hpo/core/db.py tests/conftest.py tests/test_db.py
+git add src/agentune/core/db.py tests/conftest.py tests/test_db.py
 git commit -m "feat: database layer with schema setup and connection management"
 ```
 
@@ -959,7 +959,7 @@ git commit -m "feat: database layer with schema setup and connection management"
 ### Task 5: Lease/Claim Locking
 
 **Files:**
-- Create: `src/agent_hpo/core/locking.py`
+- Create: `src/agentune/core/locking.py`
 - Create: `tests/test_locking.py`
 
 - [ ] **Step 1: Write tests for lease model**
@@ -967,8 +967,8 @@ git commit -m "feat: database layer with schema setup and connection management"
 ```python
 # tests/test_locking.py
 import pytest
-from agent_hpo.core.db import Database
-from agent_hpo.core.locking import LeaseManager, LeaseError
+from agentune.core.db import Database
+from agentune.core.locking import LeaseManager, LeaseError
 
 
 @pytest.fixture
@@ -1051,7 +1051,7 @@ Expected: FAIL — `ModuleNotFoundError`
 - [ ] **Step 3: Implement lease manager**
 
 ```python
-# src/agent_hpo/core/locking.py
+# src/agentune/core/locking.py
 """Lease-based concurrency control for campaign execution."""
 
 from __future__ import annotations
@@ -1059,7 +1059,7 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 
-from agent_hpo.core.db import Database
+from agentune.core.db import Database
 
 LEASE_DURATION = timedelta(minutes=15)
 REFRESH_INTERVAL = timedelta(minutes=5)
@@ -1116,7 +1116,7 @@ Expected: All tests PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hpo/core/locking.py tests/test_locking.py
+git add src/agentune/core/locking.py tests/test_locking.py
 git commit -m "feat: lease-based concurrency control for campaign execution"
 ```
 
@@ -1125,7 +1125,7 @@ git commit -m "feat: lease-based concurrency control for campaign execution"
 ### Task 6: Campaign Service (Core)
 
 **Files:**
-- Create: `src/agent_hpo/core/campaign.py`
+- Create: `src/agentune/core/campaign.py`
 - Create: `tests/test_campaign.py`
 
 This is the largest task. It covers: campaign CRUD, round creation (including system-generated round 1), proposal validation (guardrails, cooldown), and state transitions.
@@ -1137,12 +1137,12 @@ This is the largest task. It covers: campaign CRUD, round creation (including sy
 # tests/test_campaign.py
 import json
 import pytest
-from agent_hpo.core.db import Database
-from agent_hpo.core.campaign import CampaignService
-from agent_hpo.core.models import (
+from agentune.core.db import Database
+from agentune.core.campaign import CampaignService
+from agentune.core.models import (
     CampaignConfig, ImprovementCriteria, StopConditions, ParamSpec, ActionProposal,
 )
-from agent_hpo.core.state import CampaignState, RoundState
+from agentune.core.state import CampaignState, RoundState
 
 
 @pytest.fixture
@@ -1404,7 +1404,7 @@ Expected: FAIL — `ModuleNotFoundError`
 
 
 ```python
-# src/agent_hpo/core/campaign.py
+# src/agentune/core/campaign.py
 """Campaign and round management — the core service layer."""
 
 from __future__ import annotations
@@ -1414,13 +1414,13 @@ from typing import Any
 
 from psycopg.rows import dict_row
 
-from agent_hpo.core.db import Database
-from agent_hpo.core.models import (
+from agentune.core.db import Database
+from agentune.core.models import (
     ActionProposal,
     CampaignConfig,
     ParamSpec,
 )
-from agent_hpo.core.state import (
+from agentune.core.state import (
     CampaignState,
     RoundState,
     validate_campaign_transition,
@@ -1575,7 +1575,7 @@ class CampaignService:
         # Validate search space against backend param definitions
         if proposal.action in ("narrow_search", "widen_search") and proposal.proposed_search_space:
             campaign = self.get_campaign(campaign_id)
-            from agent_hpo.backends import get_backend
+            from agentune.backends import get_backend
             backend_cls = get_backend(campaign["backend"])
             backend = backend_cls()
             valid_names = {p.name for p in backend.param_definitions()}
@@ -1724,7 +1724,7 @@ Expected: All tests PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hpo/core/campaign.py tests/test_campaign.py
+git add src/agentune/core/campaign.py tests/test_campaign.py
 git commit -m "feat: campaign service with CRUD, round management, and proposal validation"
 ```
 
@@ -1733,9 +1733,9 @@ git commit -m "feat: campaign service with CRUD, round management, and proposal 
 ### Task 7: Backend Interface + XGBoost
 
 **Files:**
-- Create: `src/agent_hpo/backends/base.py`
-- Modify: `src/agent_hpo/backends/__init__.py`
-- Create: `src/agent_hpo/backends/xgboost.py`
+- Create: `src/agentune/backends/base.py`
+- Modify: `src/agentune/backends/__init__.py`
+- Create: `src/agentune/backends/xgboost.py`
 - Create: `tests/test_backend_xgboost.py`
 
 - [ ] **Step 1: Write tests for XGBoost backend**
@@ -1748,9 +1748,9 @@ import optuna
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 
-from agent_hpo.backends.base import suggest_from_param_spec
-from agent_hpo.backends.xgboost import XGBoostBackend
-from agent_hpo.core.models import ParamSpec, DatasetSplit
+from agentune.backends.base import suggest_from_param_spec
+from agentune.backends.xgboost import XGBoostBackend
+from agentune.core.models import ParamSpec, DatasetSplit
 
 
 @pytest.fixture
@@ -1826,7 +1826,7 @@ Expected: FAIL — `ModuleNotFoundError`
 - [ ] **Step 3: Implement base.py**
 
 ```python
-# src/agent_hpo/backends/base.py
+# src/agentune/backends/base.py
 """Backend protocol and shared helpers."""
 
 from __future__ import annotations
@@ -1835,7 +1835,7 @@ from typing import Any, Callable, Protocol
 
 import optuna
 
-from agent_hpo.core.models import DatasetSplit, ParamSpec
+from agentune.core.models import DatasetSplit, ParamSpec
 
 
 def suggest_from_param_spec(trial: optuna.Trial, spec: ParamSpec) -> Any:
@@ -1866,8 +1866,8 @@ class ObjectiveBackend(Protocol):
 - [ ] **Step 4: Implement xgboost.py**
 
 ```python
-# src/agent_hpo/backends/xgboost.py
-"""XGBoost backend for agent-hpo."""
+# src/agentune/backends/xgboost.py
+"""XGBoost backend for agentune."""
 
 from __future__ import annotations
 
@@ -1877,8 +1877,8 @@ import optuna
 import xgboost as xgb
 from sklearn.metrics import accuracy_score, mean_squared_error, log_loss
 
-from agent_hpo.backends.base import suggest_from_param_spec
-from agent_hpo.core.models import DatasetSplit, ParamSpec
+from agentune.backends.base import suggest_from_param_spec
+from agentune.core.models import DatasetSplit, ParamSpec
 
 METRICS = {
     "accuracy": (accuracy_score, False),       # (fn, needs_proba)
@@ -1948,9 +1948,9 @@ class XGBoostBackend:
 
 - [ ] **Step 5: Register the backend**
 
-Update `src/agent_hpo/backends/__init__.py` to add:
+Update `src/agentune/backends/__init__.py` to add:
 ```python
-from agent_hpo.backends.xgboost import XGBoostBackend
+from agentune.backends.xgboost import XGBoostBackend
 register_backend("xgboost", XGBoostBackend)
 ```
 
@@ -1962,7 +1962,7 @@ Expected: All tests PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/agent_hpo/backends/ tests/test_backend_xgboost.py
+git add src/agentune/backends/ tests/test_backend_xgboost.py
 git commit -m "feat: XGBoost backend with search space support and train metric logging"
 ```
 
@@ -1971,7 +1971,7 @@ git commit -m "feat: XGBoost backend with search space support and train metric 
 ### Task 8: Summarizer
 
 **Files:**
-- Create: `src/agent_hpo/summarizer.py`
+- Create: `src/agentune/summarizer.py`
 - Create: `tests/test_summarizer.py`
 
 - [ ] **Step 1: Write tests for summarizer**
@@ -1980,8 +1980,8 @@ git commit -m "feat: XGBoost backend with search space support and train metric 
 # tests/test_summarizer.py
 import pytest
 import optuna
-from agent_hpo.summarizer import RoundSummarizer
-from agent_hpo.core.models import RoundSummary
+from agentune.summarizer import RoundSummarizer
+from agentune.core.models import RoundSummary
 
 
 def _make_study_with_trials(n_trials=10, direction="maximize"):
@@ -2102,7 +2102,7 @@ Expected: FAIL — `ModuleNotFoundError`
 - [ ] **Step 3: Implement summarizer**
 
 ```python
-# src/agent_hpo/summarizer.py
+# src/agentune/summarizer.py
 """Produces immutable, schema-versioned round summaries from Optuna study data."""
 
 from __future__ import annotations
@@ -2113,7 +2113,7 @@ from typing import Any
 import optuna
 from optuna.trial import TrialState
 
-from agent_hpo.core.models import RoundSummary
+from agentune.core.models import RoundSummary
 
 
 class RoundSummarizer:
@@ -2279,7 +2279,7 @@ Expected: All tests PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hpo/summarizer.py tests/test_summarizer.py
+git add src/agentune/summarizer.py tests/test_summarizer.py
 git commit -m "feat: round summarizer with trial boundaries and nullable fields"
 ```
 
@@ -2288,7 +2288,7 @@ git commit -m "feat: round summarizer with trial boundaries and nullable fields"
 ### Task 9: Scheduler
 
 **Files:**
-- Create: `src/agent_hpo/scheduler.py`
+- Create: `src/agentune/scheduler.py`
 - Create: `tests/test_scheduler.py`
 
 The scheduler orchestrates one round: budget clipping, Optuna execution, summarization, stop condition checks. Returns control at `AWAITING_AGENT`, `COMPLETED`, or `FAILED`.
@@ -2300,8 +2300,8 @@ The scheduler orchestrates one round: budget clipping, Optuna execution, summari
 import pytest
 import optuna
 
-from agent_hpo.scheduler import Scheduler
-from agent_hpo.core.models import (
+from agentune.scheduler import Scheduler
+from agentune.core.models import (
     CampaignConfig, ImprovementCriteria, StopConditions, ParamSpec, RoundSummary,
 )
 
@@ -2404,12 +2404,12 @@ Expected: FAIL — `ModuleNotFoundError`
 
 
 ```python
-# src/agent_hpo/scheduler.py
+# src/agentune/scheduler.py
 """Round orchestration: budget clipping, stop conditions, execution control."""
 
 from __future__ import annotations
 
-from agent_hpo.core.models import (
+from agentune.core.models import (
     ImprovementCriteria,
     RoundSummary,
     StopConditions,
@@ -2491,7 +2491,7 @@ Expected: All tests PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hpo/scheduler.py tests/test_scheduler.py
+git add src/agentune/scheduler.py tests/test_scheduler.py
 git commit -m "feat: scheduler with budget clipping, stop conditions, and patience check"
 ```
 
@@ -2500,7 +2500,7 @@ git commit -m "feat: scheduler with budget clipping, stop conditions, and patien
 ### Task 10: CLI
 
 **Files:**
-- Create: `src/agent_hpo/cli.py`
+- Create: `src/agentune/cli.py`
 - Create: `tests/test_cli.py`
 
 Thin Click wrapper over the core service layer. Each command reads config, calls core, prints output.
@@ -2512,7 +2512,7 @@ Thin Click wrapper over the core service layer. Each command reads config, calls
 import json
 import pytest
 from click.testing import CliRunner
-from agent_hpo.cli import cli
+from agentune.cli import cli
 
 
 @pytest.fixture
@@ -2522,7 +2522,7 @@ def runner():
 
 class TestCliInit:
     def test_init_creates_campaign(self, runner, test_db_url, monkeypatch):
-        monkeypatch.setenv("AGENT_HPO_DB_URL", test_db_url)
+        monkeypatch.setenv("AGENTUNE_DB_URL", test_db_url)
         result = runner.invoke(cli, [
             "init", "my-campaign",
             "--backend", "xgboost",
@@ -2537,7 +2537,7 @@ class TestCliInit:
         assert "CREATED" in result.output
 
     def test_init_duplicate_fails(self, runner, test_db_url, monkeypatch):
-        monkeypatch.setenv("AGENT_HPO_DB_URL", test_db_url)
+        monkeypatch.setenv("AGENTUNE_DB_URL", test_db_url)
         runner.invoke(cli, [
             "init", "dup-test",
             "--backend", "xgboost",
@@ -2555,7 +2555,7 @@ class TestCliInit:
 
 class TestCliStatus:
     def test_status_shows_campaign(self, runner, test_db_url, monkeypatch):
-        monkeypatch.setenv("AGENT_HPO_DB_URL", test_db_url)
+        monkeypatch.setenv("AGENTUNE_DB_URL", test_db_url)
         runner.invoke(cli, [
             "init", "status-test",
             "--backend", "xgboost",
@@ -2576,7 +2576,7 @@ Expected: FAIL — `ModuleNotFoundError`
 
 
 ```python
-# src/agent_hpo/cli.py
+# src/agentune/cli.py
 """CLI: thin Click wrapper over the core service layer."""
 
 from __future__ import annotations
@@ -2587,19 +2587,19 @@ import sys
 
 import click
 
-from agent_hpo.core.db import Database
-from agent_hpo.core.campaign import CampaignService
-from agent_hpo.core.models import (
+from agentune.core.db import Database
+from agentune.core.campaign import CampaignService
+from agentune.core.models import (
     CampaignConfig,
     ImprovementCriteria,
     StopConditions,
 )
-from agent_hpo.core.state import CampaignState
-from agent_hpo.backends import get_backend
+from agentune.core.state import CampaignState
+from agentune.backends import get_backend
 
 
 def _get_db() -> Database:
-    url = os.environ.get("AGENT_HPO_DB_URL", "postgresql://localhost:5432/agent_hpo")
+    url = os.environ.get("AGENTUNE_DB_URL", "postgresql://localhost:5432/agentune")
     db = Database(url)
     db.setup_schema()
     return db
@@ -2766,7 +2766,7 @@ def stop(name):
         if active_round and active_round["state"] in ("RUNNING", "SUMMARIZING"):
             click.echo(
                 f"Cannot stop: round {active_round['round_number']} is {active_round['state']}. "
-                f"Use 'agent-hpo pause' to request a safe stop after the round completes.",
+                f"Use 'agentune pause' to request a safe stop after the round completes.",
                 err=True,
             )
             sys.exit(1)
@@ -2845,7 +2845,7 @@ Expected: All tests PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hpo/cli.py tests/test_cli.py
+git add src/agentune/cli.py tests/test_cli.py
 git commit -m "feat: CLI with init, status, pause, resume, stop, history, export commands"
 ```
 
@@ -2854,8 +2854,8 @@ git commit -m "feat: CLI with init, status, pause, resume, stop, history, export
 ### Task 10b: CLI `run` and `baseline` Commands (Core Orchestration)
 
 **Files:**
-- Modify: `src/agent_hpo/cli.py`
-- Create: `src/agent_hpo/runner.py` (round orchestration logic, reusable by CLI and tests)
+- Modify: `src/agentune/cli.py`
+- Create: `src/agentune/runner.py` (round orchestration logic, reusable by CLI and tests)
 - Create: `tests/test_runner.py`
 
 This is the core orchestration — wires together scheduler, backend, summarizer, and Optuna with persistent RDBStorage.
@@ -2868,13 +2868,13 @@ import pytest
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 
-from agent_hpo.runner import RoundRunner, RunResult
-from agent_hpo.core.db import Database
-from agent_hpo.core.campaign import CampaignService
-from agent_hpo.core.models import (
+from agentune.runner import RoundRunner, RunResult
+from agentune.core.db import Database
+from agentune.core.campaign import CampaignService
+from agentune.core.models import (
     CampaignConfig, ImprovementCriteria, StopConditions, ParamSpec, DatasetSplit,
 )
-from agent_hpo.core.state import CampaignState, RoundState
+from agentune.core.state import CampaignState, RoundState
 
 
 @pytest.fixture
@@ -2896,7 +2896,7 @@ def dataset():
 @pytest.fixture
 def campaign(db):
     service = CampaignService(db)
-    from agent_hpo.backends.xgboost import XGBoostBackend
+    from agentune.backends.xgboost import XGBoostBackend
     backend = XGBoostBackend()
     config = CampaignConfig(
         metric_name="accuracy",
@@ -2953,7 +2953,7 @@ Expected: FAIL — `ModuleNotFoundError`
 
 
 ```python
-# src/agent_hpo/runner.py
+# src/agentune/runner.py
 """Round orchestration: executes one study round end-to-end."""
 
 from __future__ import annotations
@@ -2964,20 +2964,20 @@ from dataclasses import dataclass
 
 import optuna
 
-from agent_hpo.backends import get_backend
-from agent_hpo.core.campaign import CampaignService
-from agent_hpo.core.db import Database
-from agent_hpo.core.locking import LeaseManager
-from agent_hpo.core.models import (
+from agentune.backends import get_backend
+from agentune.core.campaign import CampaignService
+from agentune.core.db import Database
+from agentune.core.locking import LeaseManager
+from agentune.core.models import (
     ImprovementCriteria,
     ParamSpec,
     RoundSummary,
     StopConditions,
     DatasetSplit,
 )
-from agent_hpo.core.state import CampaignState, RoundState
-from agent_hpo.scheduler import Scheduler
-from agent_hpo.summarizer import RoundSummarizer
+from agentune.core.state import CampaignState, RoundState
+from agentune.scheduler import Scheduler
+from agentune.summarizer import RoundSummarizer
 
 
 @dataclass
@@ -3183,7 +3183,7 @@ class RoundRunner:
 
 - [ ] **Step 4: Add `run` and `baseline` commands to cli.py**
 
-Add to `src/agent_hpo/cli.py`:
+Add to `src/agentune/cli.py`:
 
 ```python
 @cli.command()
@@ -3192,8 +3192,8 @@ Add to `src/agent_hpo/cli.py`:
 @click.option("--split-seed", default=42, type=int)
 def run(name, dataset, split_seed):
     """Execute the next study round for a campaign."""
-    from agent_hpo.datasets import load_dataset
-    from agent_hpo.runner import RoundRunner
+    from agentune.datasets import load_dataset
+    from agentune.runner import RoundRunner
 
     db = _get_db()
     try:
@@ -3227,8 +3227,8 @@ def run(name, dataset, split_seed):
 def baseline(name, dataset, total_trials, split_seed, sampler_seed):
     """Run a plain Optuna baseline with the same budget for comparison."""
     import optuna
-    from agent_hpo.datasets import load_dataset
-    from agent_hpo.backends.xgboost import XGBoostBackend
+    from agentune.datasets import load_dataset
+    from agentune.backends.xgboost import XGBoostBackend
 
     split, meta = load_dataset(dataset, seed=split_seed)
     backend = XGBoostBackend()
@@ -3257,7 +3257,7 @@ Expected: All tests PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/agent_hpo/runner.py src/agent_hpo/cli.py tests/test_runner.py
+git add src/agentune/runner.py src/agentune/cli.py tests/test_runner.py
 git commit -m "feat: round runner with full orchestration, run and baseline CLI commands"
 ```
 
@@ -3266,7 +3266,7 @@ git commit -m "feat: round runner with full orchestration, run and baseline CLI 
 ### Task 11: MCP Server
 
 **Files:**
-- Create: `src/agent_hpo/mcp_server.py`
+- Create: `src/agentune/mcp_server.py`
 - Create: `tests/test_mcp_server.py`
 
 5 MCP tools over the core service layer.
@@ -3277,16 +3277,16 @@ git commit -m "feat: round runner with full orchestration, run and baseline CLI 
 # tests/test_mcp_server.py
 import json
 import pytest
-from agent_hpo.mcp_server import (
+from agentune.mcp_server import (
     handle_list_campaigns,
     handle_get_campaign_status,
     handle_get_round_summary,
     handle_get_campaign_history,
     handle_submit_action_proposal,
 )
-from agent_hpo.core.db import Database
-from agent_hpo.core.campaign import CampaignService
-from agent_hpo.core.models import (
+from agentune.core.db import Database
+from agentune.core.campaign import CampaignService
+from agentune.core.models import (
     CampaignConfig, ImprovementCriteria, StopConditions, ParamSpec,
 )
 
@@ -3348,7 +3348,7 @@ Expected: FAIL — `ModuleNotFoundError`
 - [ ] **Step 3: Implement MCP server**
 
 ```python
-# src/agent_hpo/mcp_server.py
+# src/agentune/mcp_server.py
 """MCP server: agent-facing control plane with 5 tools."""
 
 from __future__ import annotations
@@ -3361,9 +3361,9 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-from agent_hpo.core.db import Database
-from agent_hpo.core.campaign import CampaignService
-from agent_hpo.core.models import ActionProposal
+from agentune.core.db import Database
+from agentune.core.campaign import CampaignService
+from agentune.core.models import ActionProposal
 
 
 # --- Handler functions (testable without MCP transport) ---
@@ -3438,7 +3438,7 @@ def handle_submit_action_proposal(db: Database, campaign_name: str, proposal_dic
 # --- MCP Server setup ---
 
 def create_server() -> Server:
-    server = Server("agent-hpo")
+    server = Server("agentune")
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -3526,7 +3526,7 @@ def create_server() -> Server:
 
 
 def _get_db() -> Database:
-    url = os.environ.get("AGENT_HPO_DB_URL", "postgresql://localhost:5432/agent_hpo")
+    url = os.environ.get("AGENTUNE_DB_URL", "postgresql://localhost:5432/agentune")
     db = Database(url)
     db.setup_schema()
     return db
@@ -3551,7 +3551,7 @@ Expected: All tests PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hpo/mcp_server.py tests/test_mcp_server.py
+git add src/agentune/mcp_server.py tests/test_mcp_server.py
 git commit -m "feat: MCP server with 5 agent-facing tools over core service layer"
 ```
 
@@ -3567,13 +3567,13 @@ git commit -m "feat: MCP server with 5 agent-facing tools over core service laye
 - [ ] **Step 1: Write hpo-overview skill**
 
 ```markdown
-# src/agent_hpo/skills/hpo-overview.md
+# src/agentune/skills/hpo-overview.md
 ---
 name: hpo-overview
 description: System model for agent-driven hyperparameter optimization
 ---
 
-# Agent-HPO Overview
+# Agentune Overview
 
 You are orchestrating hyperparameter optimization campaigns. You operate **between** bounded optimization rounds — you never control what happens inside a round.
 
@@ -3613,14 +3613,14 @@ You do NOT:
 
 ## CLI Commands (for execution)
 
-- `agent-hpo run <name>` — execute the next round
-- `agent-hpo status <name>` — check campaign state
+- `agentune run <name>` — execute the next round
+- `agentune status <name>` — check campaign state
 ```
 
 - [ ] **Step 2: Write hpo-interpret-summary skill**
 
 ```markdown
-# src/agent_hpo/skills/hpo-interpret-summary.md
+# src/agentune/skills/hpo-interpret-summary.md
 ---
 name: hpo-interpret-summary
 description: How to read and interpret round summary fields
@@ -3661,7 +3661,7 @@ description: How to read and interpret round summary fields
 - [ ] **Step 3: Write hpo-action-guidelines skill**
 
 ```markdown
-# src/agent_hpo/skills/hpo-action-guidelines.md
+# src/agentune/skills/hpo-action-guidelines.md
 ---
 name: hpo-action-guidelines
 description: Decision framework for choosing next actions in HPO campaigns
@@ -3709,7 +3709,7 @@ After each round, choose exactly one action:
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/agent_hpo/skills/
+git add src/agentune/skills/
 git commit -m "feat: agent skills for HPO overview, summary interpretation, and action guidelines"
 ```
 
@@ -3721,10 +3721,10 @@ git commit -m "feat: agent skills for HPO overview, summary interpretation, and 
 - Create: `benchmarks/datasets.py`
 - Create: `benchmarks/run_benchmark.py`
 
-- [ ] **Step 1: Write dataset loader (packaged under agent_hpo)**
+- [ ] **Step 1: Write dataset loader (packaged under agentune)**
 
 ```python
-# src/agent_hpo/datasets.py
+# src/agentune/datasets.py
 """Dataset loading with consistent train/val/test splits."""
 
 from __future__ import annotations
@@ -3732,7 +3732,7 @@ from __future__ import annotations
 from sklearn.datasets import load_breast_cancer, fetch_california_housing, load_digits
 from sklearn.model_selection import train_test_split
 
-from agent_hpo.core.models import DatasetSplit
+from agentune.core.models import DatasetSplit
 
 DATASETS = {
     "breast_cancer": {"loader": load_breast_cancer, "metric": "accuracy", "direction": "maximize"},
@@ -3767,9 +3767,9 @@ import time
 import click
 import optuna
 
-from agent_hpo.datasets import load_dataset, DATASETS
-from agent_hpo.backends.xgboost import XGBoostBackend
-from agent_hpo.core.models import ParamSpec
+from agentune.datasets import load_dataset, DATASETS
+from agentune.backends.xgboost import XGBoostBackend
+from agentune.core.models import ParamSpec
 
 
 @click.command()
@@ -3861,16 +3861,16 @@ import optuna
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 
-from agent_hpo.core.db import Database
-from agent_hpo.core.campaign import CampaignService
-from agent_hpo.core.models import (
+from agentune.core.db import Database
+from agentune.core.campaign import CampaignService
+from agentune.core.models import (
     CampaignConfig, ImprovementCriteria, StopConditions, ParamSpec,
     ActionProposal, DatasetSplit,
 )
-from agent_hpo.core.state import CampaignState, RoundState
-from agent_hpo.backends.xgboost import XGBoostBackend
-from agent_hpo.summarizer import RoundSummarizer
-from agent_hpo.scheduler import Scheduler
+from agentune.core.state import CampaignState, RoundState
+from agentune.backends.xgboost import XGBoostBackend
+from agentune.summarizer import RoundSummarizer
+from agentune.scheduler import Scheduler
 
 
 @pytest.fixture

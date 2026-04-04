@@ -6,29 +6,75 @@ import json
 import os
 import sys
 import time
+from typing import Any, NoReturn
 
 import click
 
-from agent_hpo.core.db import Database
-from agent_hpo.core.campaign import CampaignService
-from agent_hpo.core.models import (
+from agentune.backends import get_backend
+from agentune.core.campaign import CampaignService
+from agentune.core.db import Database
+from agentune.core.models import (
     CampaignConfig,
     ImprovementCriteria,
     StopConditions,
 )
-from agent_hpo.core.state import CampaignState
-from agent_hpo.backends import get_backend
+from agentune.core.state import CampaignState
 
 
 def _get_db() -> Database:
-    url = os.environ.get("AGENT_HPO_DB_URL", "postgresql://localhost:5432/agent_hpo")
+    url = os.environ.get("AGENTUNE_DB_URL", "postgresql://localhost:5432/agentune")
     db = Database(url)
     db.setup_schema()
     return db
 
 
+def _load_json(value: Any) -> Any:
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _exit_with_error(message: str) -> NoReturn:
+    click.echo(message, err=True)
+    sys.exit(1)
+
+
+def _exit_for_exception(error: Exception) -> NoReturn:
+    _exit_with_error(f"Error: {error}")
+
+
+def _get_campaign_or_exit(service: CampaignService, name: str) -> dict:
+    campaign = service.get_campaign_by_name(name)
+    if campaign is None:
+        _exit_with_error(f"Campaign '{name}' not found")
+    return campaign
+
+
+def _print_best_params(best_params: dict[str, Any]) -> None:
+    click.echo("\n    Best params:")
+    for name, value in best_params.items():
+        if isinstance(value, float):
+            click.echo(f"      {name:25s} {value:.6f}")
+            continue
+        click.echo(f"      {name:25s} {value}")
+
+
+def _print_search_space_changes(changes: list[dict[str, Any]]) -> None:
+    click.echo("\n  SEARCH SPACE CHANGES:")
+    click.echo(f"    {'Param':25s} {'Old Range':>20s}  →  {'New Range':20s} {'Reason'}")
+    click.echo(f"    {'─' * 25} {'─' * 20}     {'─' * 20} {'─' * 30}")
+    for change in changes:
+        if change.get("param_type") == "categorical":
+            old_range = "categorical"
+            new_range = "categorical"
+        else:
+            old_range = f"[{change['old_low']:.4g}, {change['old_high']:.4g}]"
+            new_range = f"[{change['new_low']:.4g}, {change['new_high']:.4g}]"
+        click.echo(f"    {change['param_name']:25s} {old_range:>20s}  →  {new_range:20s} {change['reason']}")
+
+
 @click.group()
-def cli():
+def cli() -> None:
     """Agent-driven hyperparameter optimization."""
     pass
 
@@ -38,6 +84,7 @@ def cli():
 @click.option("--backend", default="xgboost")
 @click.option("--metric", required=True)
 @click.option("--direction", required=True, type=click.Choice(["minimize", "maximize"]))
+@click.option("--dataset", required=True, help="Dataset name: breast_cancer, california_housing, digits")
 @click.option("--trials-per-round", default=50, type=int)
 @click.option("--max-rounds", default=None, type=int)
 @click.option("--max-trials", default=None, type=int)
@@ -48,9 +95,24 @@ def cli():
               type=click.Choice(["strict_better", "min_absolute_delta", "min_relative_delta"]))
 @click.option("--improvement-threshold", default=0.0, type=float)
 @click.option("--sampler-seed", default=42, type=int)
-def init(name, backend, metric, direction, trials_per_round, max_rounds,
-         max_trials, max_wall_time, patience, target_score,
-         improvement_mode, improvement_threshold, sampler_seed):
+@click.option("--split-seed", default=42, type=int)
+def init(
+    name: str,
+    backend: str,
+    metric: str,
+    direction: str,
+    dataset: str,
+    trials_per_round: int,
+    max_rounds: int | None,
+    max_trials: int | None,
+    max_wall_time: float | None,
+    patience: int,
+    target_score: float | None,
+    improvement_mode: str,
+    improvement_threshold: float,
+    sampler_seed: int,
+    split_seed: int,
+) -> None:
     """Create a new optimization campaign."""
     db = _get_db()
     service = CampaignService(db)
@@ -74,37 +136,37 @@ def init(name, backend, metric, direction, trials_per_round, max_rounds,
             target_score=target_score,
         ),
         trials_per_round=trials_per_round,
+        dataset=dataset,
+        split_seed=split_seed,
     )
 
     try:
         campaign = service.create_campaign(name, config)
         click.echo(f"Campaign '{name}' created (id={campaign['id']}, state={campaign['state']})")
         click.echo(f"Round 1 ready with {trials_per_round} trials budget")
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+    except Exception as error:
+        _exit_for_exception(error)
     finally:
         db.close()
 
 
 @cli.command()
 @click.argument("name")
-def status(name):
+def status(name: str) -> None:
     """Show campaign status and latest round summary."""
     db = _get_db()
     service = CampaignService(db)
     try:
-        with db.connection() as conn:
-            cur = conn.execute("SELECT * FROM campaigns WHERE name = %s", (name,))
-            campaign = cur.fetchone()
-        if not campaign:
-            click.echo(f"Campaign '{name}' not found", err=True)
-            sys.exit(1)
+        campaign = _get_campaign_or_exit(service, name)
 
         click.echo(f"Campaign: {campaign['name']}")
         click.echo(f"State: {campaign['state']}")
         click.echo(f"Metric: {campaign['metric_name']} ({campaign['objective_direction']})")
         click.echo(f"Backend: {campaign['backend']}")
+        if campaign.get("termination_reason"):
+            click.echo(f"Termination: {campaign['termination_reason']}")
+            if campaign.get("termination_detail"):
+                click.echo(f"Detail: {campaign['termination_detail']}")
 
         rounds = service.get_rounds(campaign["id"])
         click.echo(f"Rounds: {len(rounds)}")
@@ -112,9 +174,7 @@ def status(name):
             latest = rounds[-1]
             click.echo(f"Latest round: #{latest['round_number']} ({latest['state']})")
             if latest.get("summary"):
-                summary = latest["summary"]
-                if isinstance(summary, str):
-                    summary = json.loads(summary)
+                summary = _load_json(latest["summary"])
                 click.echo(f"Best score: {summary.get('best_score', 'N/A')}")
     finally:
         db.close()
@@ -122,95 +182,71 @@ def status(name):
 
 @cli.command()
 @click.argument("name")
-def pause(name):
+def pause(name: str) -> None:
     """Pause a running campaign."""
     db = _get_db()
     service = CampaignService(db)
     try:
-        with db.connection() as conn:
-            cur = conn.execute("SELECT id FROM campaigns WHERE name = %s", (name,))
-            campaign = cur.fetchone()
-        if not campaign:
-            click.echo(f"Campaign '{name}' not found", err=True)
-            sys.exit(1)
+        campaign = _get_campaign_or_exit(service, name)
         service.transition_campaign(campaign["id"], CampaignState.PAUSE_REQUESTED)
         click.echo(f"Campaign '{name}' pause requested")
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+    except Exception as error:
+        _exit_for_exception(error)
     finally:
         db.close()
 
 
 @cli.command()
 @click.argument("name")
-def resume(name):
+def resume(name: str) -> None:
     """Resume a paused campaign."""
     db = _get_db()
     service = CampaignService(db)
     try:
-        with db.connection() as conn:
-            cur = conn.execute("SELECT id FROM campaigns WHERE name = %s", (name,))
-            campaign = cur.fetchone()
-        if not campaign:
-            click.echo(f"Campaign '{name}' not found", err=True)
-            sys.exit(1)
+        campaign = _get_campaign_or_exit(service, name)
         service.transition_campaign(campaign["id"], CampaignState.RUNNING)
         click.echo(f"Campaign '{name}' resumed")
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+    except Exception as error:
+        _exit_for_exception(error)
     finally:
         db.close()
 
 
 @cli.command()
 @click.argument("name")
-def stop(name):
+def stop(name: str) -> None:
     """Manually stop a campaign."""
     db = _get_db()
     service = CampaignService(db)
     try:
-        with db.connection() as conn:
-            cur = conn.execute("SELECT * FROM campaigns WHERE name = %s", (name,))
-            campaign = cur.fetchone()
-        if not campaign:
-            click.echo(f"Campaign '{name}' not found", err=True)
-            sys.exit(1)
-
+        campaign = _get_campaign_or_exit(service, name)
         rounds = service.get_rounds(campaign["id"])
         active_round = rounds[-1] if rounds else None
         if active_round and active_round["state"] in ("RUNNING", "SUMMARIZING"):
-            click.echo(
+            _exit_with_error(
                 f"Cannot stop: round {active_round['round_number']} is {active_round['state']}. "
-                f"Use 'agent-hpo pause' to request a safe stop after the round completes.",
-                err=True,
+                f"Use 'agentune pause' to request a safe stop after the round completes."
             )
-            sys.exit(1)
 
-        service.transition_campaign(campaign["id"], CampaignState.STOPPED)
+        service.transition_campaign(
+            campaign["id"], CampaignState.STOPPED,
+            termination_reason="manual_stop",
+        )
         click.echo(f"Campaign '{name}' stopped")
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+    except Exception as error:
+        _exit_for_exception(error)
     finally:
         db.close()
 
 
 @cli.command()
 @click.argument("name")
-def history(name):
+def history(name: str) -> None:
     """Show full campaign history: rounds and decisions."""
     db = _get_db()
     service = CampaignService(db)
     try:
-        with db.connection() as conn:
-            cur = conn.execute("SELECT id FROM campaigns WHERE name = %s", (name,))
-            campaign = cur.fetchone()
-        if not campaign:
-            click.echo(f"Campaign '{name}' not found", err=True)
-            sys.exit(1)
-
+        campaign = _get_campaign_or_exit(service, name)
         data = service.get_campaign_history(campaign["id"])
         for r in data["rounds"]:
             click.echo(f"Round #{r['round_number']}: {r['state']} (study: {r['optuna_study_name']})")
@@ -224,7 +260,7 @@ def history(name):
 @cli.command()
 @click.argument("name")
 @click.option("--round", "round_num", default=None, type=int, help="Show decision for a specific round only")
-def decisions(name, round_num):
+def decisions(name: str, round_num: int | None) -> None:
     """Show agent decision reasoning for each round.
 
     Displays the full observe → diagnose → decide chain stored in Postgres,
@@ -234,13 +270,7 @@ def decisions(name, round_num):
     db = _get_db()
     service = CampaignService(db)
     try:
-        with db.connection() as conn:
-            cur = conn.execute("SELECT * FROM campaigns WHERE name = %s", (name,))
-            campaign = cur.fetchone()
-        if not campaign:
-            click.echo(f"Campaign '{name}' not found", err=True)
-            sys.exit(1)
-
+        campaign = _get_campaign_or_exit(service, name)
         data = service.get_campaign_history(campaign["id"])
         decisions_list = data["decisions"]
         rounds_list = data["rounds"]
@@ -264,9 +294,7 @@ def decisions(name, round_num):
             if round_num is not None and rnum != round_num:
                 continue
 
-            reasoning = d.get("reasoning")
-            if isinstance(reasoning, str):
-                reasoning = json.loads(reasoning)
+            reasoning = _load_json(d.get("reasoning"))
 
             accepted_str = "ACCEPTED" if d["accepted"] else "REJECTED"
             click.echo(f"\n{'=' * 72}")
@@ -313,12 +341,7 @@ def decisions(name, round_num):
 
             best_params = obs.get("best_params", {})
             if best_params:
-                click.echo(f"\n    Best params:")
-                for k, v in best_params.items():
-                    if isinstance(v, float):
-                        click.echo(f"      {k:25s} {v:.6f}")
-                    else:
-                        click.echo(f"      {k:25s} {v}")
+                _print_best_params(best_params)
 
             # --- Diagnosis ---
             reasons = diag.get("reasons", [])
@@ -332,17 +355,7 @@ def decisions(name, round_num):
 
             # --- Search space changes ---
             if changes:
-                click.echo(f"\n  SEARCH SPACE CHANGES:")
-                click.echo(f"    {'Param':25s} {'Old Range':>20s}  →  {'New Range':20s} {'Reason'}")
-                click.echo(f"    {'─' * 25} {'─' * 20}     {'─' * 20} {'─' * 30}")
-                for ch in changes:
-                    if ch.get("param_type") == "categorical":
-                        old_r = "categorical"
-                        new_r = "categorical"
-                    else:
-                        old_r = f"[{ch['old_low']:.4g}, {ch['old_high']:.4g}]"
-                        new_r = f"[{ch['new_low']:.4g}, {ch['new_high']:.4g}]"
-                    click.echo(f"    {ch['param_name']:25s} {old_r:>20s}  →  {new_r:20s} {ch['reason']}")
+                _print_search_space_changes(changes)
 
             budget = d.get("proposed_budget")
             if budget is not None:
@@ -362,28 +375,21 @@ def decisions(name, round_num):
 
 @cli.command(name="export")
 @click.argument("name")
-def export_cmd(name):
+def export_cmd(name: str) -> None:
     """Export best params from a campaign."""
     db = _get_db()
     service = CampaignService(db)
     try:
-        with db.connection() as conn:
-            cur = conn.execute("SELECT id FROM campaigns WHERE name = %s", (name,))
-            campaign = cur.fetchone()
-        if not campaign:
-            click.echo(f"Campaign '{name}' not found", err=True)
-            sys.exit(1)
-
+        campaign = _get_campaign_or_exit(service, name)
         rounds = service.get_rounds(campaign["id"])
         best_summary = None
-        for r in reversed(rounds):
-            if r.get("summary"):
-                s = r["summary"]
-                if isinstance(s, str):
-                    s = json.loads(s)
-                if s.get("best_params"):
-                    best_summary = s
-                    break
+        for round_row in reversed(rounds):
+            if not round_row.get("summary"):
+                continue
+            summary = _load_json(round_row["summary"])
+            if summary.get("best_params"):
+                best_summary = summary
+                break
 
         if best_summary:
             click.echo(json.dumps(best_summary["best_params"], indent=2))
@@ -397,20 +403,14 @@ def export_cmd(name):
 @click.argument("name")
 @click.option("--dataset", required=True, help="Dataset name: breast_cancer, california_housing, digits")
 @click.option("--split-seed", default=42, type=int)
-def run(name, dataset, split_seed):
+def run(name: str, dataset: str, split_seed: int) -> None:
     """Execute the next study round for a campaign."""
-    from agent_hpo.datasets import load_dataset
-    from agent_hpo.runner import RoundRunner
+    from agentune.datasets import load_dataset
+    from agentune.runner import RoundRunner
 
     db = _get_db()
     try:
-        with db.connection() as conn:
-            cur = conn.execute("SELECT id FROM campaigns WHERE name = %s", (name,))
-            campaign = cur.fetchone()
-        if not campaign:
-            click.echo(f"Campaign '{name}' not found", err=True)
-            sys.exit(1)
-
+        campaign = _get_campaign_or_exit(CampaignService(db), name)
         split, _ = load_dataset(dataset, seed=split_seed)
         runner = RoundRunner(db, split)
         result = runner.run_next_round(campaign["id"])
@@ -418,9 +418,8 @@ def run(name, dataset, split_seed):
         click.echo(f"Round {result.round_number}: {result.status}")
         if result.stop_reason:
             click.echo(f"Stop reason: {result.stop_reason}")
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+    except Exception as error:
+        _exit_for_exception(error)
     finally:
         db.close()
 
@@ -431,11 +430,17 @@ def run(name, dataset, split_seed):
 @click.option("--total-trials", required=True, type=int)
 @click.option("--split-seed", default=42, type=int)
 @click.option("--sampler-seed", default=42, type=int)
-def baseline(name, dataset, total_trials, split_seed, sampler_seed):
+def baseline(
+    name: str,
+    dataset: str,
+    total_trials: int,
+    split_seed: int,
+    sampler_seed: int,
+) -> None:
     """Run a plain Optuna baseline with the same budget for comparison."""
     import optuna
-    from agent_hpo.datasets import load_dataset
-    from agent_hpo.backends.xgboost import XGBoostBackend
+    from agentune.datasets import load_dataset
+    from agentune.backends.xgboost import XGBoostBackend
 
     split, meta = load_dataset(dataset, seed=split_seed)
     backend = XGBoostBackend()

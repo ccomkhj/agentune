@@ -4,18 +4,24 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-from agent_hpo.core.db import Database
-from agent_hpo.core.campaign import CampaignService
-from agent_hpo.core.models import ActionProposal
+from agentune.core.campaign import CampaignService
+from agentune.core.db import Database
+from agentune.core.models import ActionProposal
 
 
 # --- Handler functions (testable without MCP transport) ---
+
+def _get_campaign_or_raise(service: CampaignService, campaign_name: str) -> dict:
+    campaign = service.get_campaign_by_name(campaign_name)
+    if campaign is None:
+        raise ValueError(f"Campaign '{campaign_name}' not found")
+    return campaign
+
 
 def handle_list_campaigns(db: Database) -> list[dict]:
     with db.connection() as conn:
@@ -25,12 +31,7 @@ def handle_list_campaigns(db: Database) -> list[dict]:
 
 def handle_get_campaign_status(db: Database, campaign_name: str) -> dict:
     service = CampaignService(db)
-    with db.connection() as conn:
-        cur = conn.execute("SELECT * FROM campaigns WHERE name = %s", (campaign_name,))
-        campaign = cur.fetchone()
-    if not campaign:
-        raise ValueError(f"Campaign '{campaign_name}' not found")
-
+    campaign = _get_campaign_or_raise(service, campaign_name)
     rounds = service.get_rounds(campaign["id"])
     latest_round = rounds[-1] if rounds else None
     return {
@@ -41,53 +42,62 @@ def handle_get_campaign_status(db: Database, campaign_name: str) -> dict:
 
 
 def handle_get_round_summary(db: Database, campaign_name: str, round_number: int | None = None) -> dict:
-    with db.connection() as conn:
-        cur = conn.execute("SELECT id FROM campaigns WHERE name = %s", (campaign_name,))
-        campaign = cur.fetchone()
-    if not campaign:
-        raise ValueError(f"Campaign '{campaign_name}' not found")
-
     service = CampaignService(db)
+    campaign = _get_campaign_or_raise(service, campaign_name)
     rounds = service.get_rounds(campaign["id"])
 
     if round_number is not None:
-        target = [r for r in rounds if r["round_number"] == round_number]
-        if not target:
+        target_round = next((round_row for round_row in rounds if round_row["round_number"] == round_number), None)
+        if target_round is None:
             raise ValueError(f"Round {round_number} not found")
-        return target[0]
-    else:
-        if not rounds:
-            raise ValueError("No rounds found")
-        return rounds[-1]
+        return target_round
+
+    if not rounds:
+        raise ValueError("No rounds found")
+    return rounds[-1]
 
 
 def handle_get_campaign_history(db: Database, campaign_name: str) -> dict:
-    with db.connection() as conn:
-        cur = conn.execute("SELECT id FROM campaigns WHERE name = %s", (campaign_name,))
-        campaign = cur.fetchone()
-    if not campaign:
-        raise ValueError(f"Campaign '{campaign_name}' not found")
-
     service = CampaignService(db)
+    campaign = _get_campaign_or_raise(service, campaign_name)
     return service.get_campaign_history(campaign["id"])
 
 
-def handle_submit_action_proposal(db: Database, campaign_name: str, proposal_dict: dict) -> dict:
-    with db.connection() as conn:
-        cur = conn.execute("SELECT id FROM campaigns WHERE name = %s", (campaign_name,))
-        campaign = cur.fetchone()
-    if not campaign:
-        raise ValueError(f"Campaign '{campaign_name}' not found")
+def handle_run_next_round(db: Database, campaign_name: str) -> dict:
+    from agentune.datasets import load_dataset
+    from agentune.runner import RoundRunner
 
-    proposal = ActionProposal.from_dict(proposal_dict)
     service = CampaignService(db)
+    campaign = _get_campaign_or_raise(service, campaign_name)
+
+    if not campaign.get("dataset"):
+        raise ValueError(
+            f"Campaign '{campaign_name}' has no dataset configured. "
+            f"This is a legacy campaign created before dataset persistence was added. "
+            f"Re-create the campaign with --dataset to use run_next_round."
+        )
+
+    split, _ = load_dataset(campaign["dataset"], seed=campaign.get("split_seed", 42))
+    runner = RoundRunner(db, split)
+    result = runner.run_next_round(campaign["id"])
+    return {
+        "status": result.status,
+        "round_number": result.round_number,
+        "stop_reason": result.stop_reason,
+    }
+
+
+def handle_submit_action_proposal(db: Database, campaign_name: str, proposal_dict: dict) -> dict:
+    service = CampaignService(db)
+    campaign = _get_campaign_or_raise(service, campaign_name)
+    proposal = ActionProposal.from_dict(proposal_dict)
     return service.submit_proposal(campaign["id"], proposal)
 
 
 # --- MCP Server setup ---
 
 def create_server() -> Server:
-    server = Server("agent-hpo")
+    server = Server("agentune")
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -128,6 +138,15 @@ def create_server() -> Server:
                 },
             ),
             Tool(
+                name="run_next_round",
+                description="Execute the next PROPOSED round for a campaign. Runs Optuna trials, generates summary, checks stop conditions. Returns status (AWAITING_AGENT, COMPLETED, or FAILED).",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"campaign_name": {"type": "string"}},
+                    "required": ["campaign_name"],
+                },
+            ),
+            Tool(
                 name="submit_action_proposal",
                 description="Propose the next action for a campaign",
                 inputSchema={
@@ -137,7 +156,7 @@ def create_server() -> Server:
                         "proposal": {
                             "type": "object",
                             "properties": {
-                                "action": {"type": "string", "enum": ["continue", "narrow_search", "widen_search", "increase_budget", "stop"]},
+                                "action": {"type": "string", "enum": ["continue", "narrow_search", "widen_search", "increase_budget", "revise_search", "stop"]},
                                 "justification": {"type": "string"},
                                 "proposed_search_space": {"type": "array"},
                                 "proposed_budget": {"type": "integer"},
@@ -163,6 +182,8 @@ def create_server() -> Server:
                 result = handle_get_round_summary(db, arguments["campaign_name"], arguments.get("round_number"))
             elif name == "get_campaign_history":
                 result = handle_get_campaign_history(db, arguments["campaign_name"])
+            elif name == "run_next_round":
+                result = handle_run_next_round(db, arguments["campaign_name"])
             elif name == "submit_action_proposal":
                 result = handle_submit_action_proposal(db, arguments["campaign_name"], arguments["proposal"])
             else:
@@ -175,13 +196,13 @@ def create_server() -> Server:
 
 
 def _get_db() -> Database:
-    url = os.environ.get("AGENT_HPO_DB_URL", "postgresql://localhost:5432/agent_hpo")
+    url = os.environ.get("AGENTUNE_DB_URL", "postgresql://localhost:5432/agentune")
     db = Database(url)
     db.setup_schema()
     return db
 
 
-async def main():
+async def main() -> None:
     server = create_server()
     async with stdio_server() as (read, write):
         await server.run(read, write, server.create_initialization_options())

@@ -4,9 +4,9 @@ import optuna
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 
-from agent_hpo.backends.base import suggest_from_param_spec
-from agent_hpo.backends.xgboost import XGBoostBackend
-from agent_hpo.core.models import ParamSpec, DatasetSplit
+from agentune.backends.base import suggest_from_param_spec
+from agentune.backends.xgboost import XGBoostBackend
+from agentune.core.models import ParamSpec, DatasetSplit
 
 
 @pytest.fixture
@@ -39,6 +39,25 @@ class TestSuggestFromParamSpec:
         trial = study.ask()
         val = suggest_from_param_spec(trial, spec)
         assert val in ["gbtree", "dart"]
+
+
+class TestParamCatalog:
+    def test_available_params_is_superset_of_default(self):
+        backend = XGBoostBackend()
+        available_names = {p.name for p in backend.available_params()}
+        default_names = {p.name for p in backend.default_search_space()}
+        assert default_names.issubset(available_names)
+
+    def test_available_params_includes_extended_params(self):
+        backend = XGBoostBackend()
+        available_names = {p.name for p in backend.available_params()}
+        assert "max_leaves" in available_names
+        assert "max_bin" in available_names
+        assert "scale_pos_weight" in available_names
+
+    def test_default_search_space_is_smaller_than_catalog(self):
+        backend = XGBoostBackend()
+        assert len(backend.default_search_space()) < len(backend.available_params())
 
 
 class TestXGBoostBackend:

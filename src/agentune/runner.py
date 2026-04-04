@@ -3,24 +3,26 @@
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from dataclasses import dataclass
+from typing import Any
 
 import optuna
 
-from agent_hpo.backends import get_backend
-from agent_hpo.core.campaign import CampaignService
-from agent_hpo.core.db import Database
-from agent_hpo.core.locking import LeaseManager
-from agent_hpo.core.models import (
+from agentune.backends import get_backend
+from agentune.core.campaign import CampaignService
+from agentune.core.db import Database
+from agentune.core.locking import LeaseManager
+from agentune.core.models import (
+    DatasetSplit,
     ImprovementCriteria,
     ParamSpec,
     RoundSummary,
     StopConditions,
-    DatasetSplit,
 )
-from agent_hpo.core.state import CampaignState, RoundState
-from agent_hpo.scheduler import Scheduler
-from agent_hpo.summarizer import RoundSummarizer
+from agentune.core.state import CampaignState, RoundState
+from agentune.scheduler import Scheduler
+from agentune.summarizer import RoundSummarizer
 
 
 @dataclass
@@ -37,37 +39,119 @@ class RoundRunner:
         self._service = CampaignService(db)
         self._summarizer = RoundSummarizer()
 
+    def _load_json(self, value: Any) -> Any:
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
+
     def _cumulative_wall_time(self, rounds: list[dict]) -> float:
         total = 0.0
-        for r in rounds:
-            s = r.get("summary")
-            if s:
-                if isinstance(s, str):
-                    s = json.loads(s)
-                total = s.get("total_wall_time_seconds", total)
+        for round_row in rounds:
+            summary = round_row.get("summary")
+            if summary:
+                total = self._load_json(summary).get("total_wall_time_seconds", total)
         return total
+
+    def _previous_best_score(self, rounds: list[dict]) -> float | None:
+        for round_row in reversed(rounds):
+            summary = round_row.get("summary")
+            if not summary:
+                continue
+            best_score = self._load_json(summary).get("best_score")
+            if best_score is not None:
+                return best_score
+        return None
+
+    def _round_summaries(self, rounds: list[dict]) -> list[RoundSummary]:
+        summaries = []
+        for round_row in rounds:
+            summary = round_row.get("summary")
+            if not summary:
+                continue
+            summaries.append(RoundSummary.from_dict(self._load_json(summary)))
+        return summaries
+
+    def _complete_without_execution(
+        self,
+        campaign_id: int,
+        round_row: dict,
+        stop_reason: str,
+    ) -> RunResult:
+        for state in (
+            RoundState.RUNNING,
+            RoundState.SUMMARIZING,
+            RoundState.AWAITING_AGENT,
+            RoundState.CLOSED,
+        ):
+            self._service.transition_round(round_row["id"], state)
+        self._service.transition_campaign(
+            campaign_id, CampaignState.COMPLETED,
+            termination_reason=stop_reason,
+        )
+        return RunResult("COMPLETED", round_row["round_number"], stop_reason)
+
+    def _complete_after_summary(
+        self,
+        campaign_id: int,
+        round_id: int,
+        round_number: int,
+        stop_reason: str,
+    ) -> RunResult:
+        for state in (RoundState.AWAITING_AGENT, RoundState.CLOSED):
+            self._service.transition_round(round_id, state)
+        self._service.transition_campaign(
+            campaign_id, CampaignState.COMPLETED,
+            termination_reason=stop_reason,
+        )
+        return RunResult("COMPLETED", round_number, stop_reason)
 
     def run_next_round(self, campaign_id: int) -> RunResult:
         lease = LeaseManager(self._db)
         lease.acquire(campaign_id)
         try:
             return self._execute(campaign_id, lease)
+        except Exception as exc:
+            return self._handle_failure(campaign_id, exc)
         finally:
-            try:
+            with suppress(Exception):
                 lease.release(campaign_id)
-            except Exception:
-                pass
+
+    def _handle_failure(self, campaign_id: int, exc: Exception) -> RunResult:
+        """Mark round and campaign as FAILED with details."""
+        detail = f"{type(exc).__name__}: {exc}"
+
+        try:
+            campaign = self._service.get_campaign(campaign_id)
+            if campaign["state"] == "CREATED":
+                self._service.transition_campaign(campaign_id, CampaignState.RUNNING)
+
+            rounds = self._service.get_rounds(campaign_id)
+            if rounds:
+                current_round = rounds[-1]
+                current_state = RoundState(current_round["state"])
+                if not current_state.is_terminal and current_state != RoundState.FAILED:
+                    self._service.transition_round(
+                        current_round["id"], RoundState.FAILED,
+                        failed_from=current_state.value,
+                    )
+                round_number = current_round["round_number"]
+            else:
+                round_number = 0
+
+            self._service.transition_campaign(
+                campaign_id, CampaignState.FAILED,
+                termination_reason="failed",
+                termination_detail=detail,
+            )
+        except Exception:
+            pass  # best-effort — don't mask the original error
+
+        return RunResult("FAILED", round_number, detail)
 
     def _execute(self, campaign_id: int, lease: LeaseManager) -> RunResult:
         campaign = self._service.get_campaign(campaign_id)
-        stop_cond = StopConditions.from_dict(
-            campaign["stop_conditions"] if isinstance(campaign["stop_conditions"], dict)
-            else json.loads(campaign["stop_conditions"])
-        )
-        improvement = ImprovementCriteria.from_dict(
-            campaign["improvement_criteria"] if isinstance(campaign["improvement_criteria"], dict)
-            else json.loads(campaign["improvement_criteria"])
-        )
+        stop_cond = StopConditions.from_dict(self._load_json(campaign["stop_conditions"]))
+        improvement = ImprovementCriteria.from_dict(self._load_json(campaign["improvement_criteria"]))
 
         # Transition campaign to RUNNING if CREATED
         if campaign["state"] == "CREATED":
@@ -87,22 +171,12 @@ class RoundRunner:
             current_round["budget"], cumulative_trials, stop_cond
         )
         if effective_budget <= 0:
-            self._service.transition_round(current_round["id"], RoundState.RUNNING)
-            self._service.transition_round(current_round["id"], RoundState.SUMMARIZING)
-            self._service.transition_round(current_round["id"], RoundState.AWAITING_AGENT)
-            self._service.transition_round(current_round["id"], RoundState.CLOSED)
-            self._service.transition_campaign(campaign_id, CampaignState.COMPLETED)
-            return RunResult("COMPLETED", round_number, "max_total_trials")
+            return self._complete_without_execution(campaign_id, current_round, "max_total_trials")
 
         # Pre-round wall time check
         cumulative_wall = self._cumulative_wall_time(rounds[:-1])
         if stop_cond.max_wall_time_seconds and cumulative_wall >= stop_cond.max_wall_time_seconds:
-            self._service.transition_round(current_round["id"], RoundState.RUNNING)
-            self._service.transition_round(current_round["id"], RoundState.SUMMARIZING)
-            self._service.transition_round(current_round["id"], RoundState.AWAITING_AGENT)
-            self._service.transition_round(current_round["id"], RoundState.CLOSED)
-            self._service.transition_campaign(campaign_id, CampaignState.COMPLETED)
-            return RunResult("COMPLETED", round_number, "max_wall_time")
+            return self._complete_without_execution(campaign_id, current_round, "max_wall_time")
 
         # Compute Optuna timeout from remaining wall time
         optuna_timeout = None
@@ -111,9 +185,7 @@ class RoundRunner:
 
         # Setup Optuna study with persistent storage
         storage = optuna.storages.RDBStorage(self._db.optuna_storage_url)
-        sampler_config = campaign["sampler_config"]
-        if isinstance(sampler_config, str):
-            sampler_config = json.loads(sampler_config)
+        sampler_config = self._load_json(campaign["sampler_config"])
         sampler = optuna.samplers.TPESampler(seed=sampler_config.get("seed", 42))
 
         study_name = current_round["optuna_study_name"]
@@ -130,9 +202,7 @@ class RoundRunner:
         # Create backend and objective
         backend_cls = get_backend(campaign["backend"])
         backend = backend_cls()
-        search_space_raw = current_round["search_space"]
-        if isinstance(search_space_raw, str):
-            search_space_raw = json.loads(search_space_raw)
+        search_space_raw = self._load_json(current_round["search_space"])
         search_space = [ParamSpec.from_dict(s) for s in search_space_raw]
         objective = backend.create_objective(self._dataset, campaign["metric_name"], search_space)
 
@@ -148,16 +218,6 @@ class RoundRunner:
 
         # Summarize
         self._service.transition_round(current_round["id"], RoundState.SUMMARIZING)
-        prev_best = None
-        for r in reversed(rounds[:-1]):
-            if r.get("summary"):
-                s = r["summary"]
-                if isinstance(s, str):
-                    s = json.loads(s)
-                if s.get("best_score") is not None:
-                    prev_best = s["best_score"]
-                    break
-
         summary = self._summarizer.summarize(
             study=study,
             campaign_id=campaign_id,
@@ -166,7 +226,7 @@ class RoundRunner:
             objective_direction=campaign["objective_direction"],
             trial_offset=trial_offset,
             trial_end=trial_end,
-            prev_best_score=prev_best,
+            prev_best_score=self._previous_best_score(rounds[:-1]),
             parent_round_id=current_round.get("parent_round_id"),
             optuna_study_name=study_name,
             action_that_created="init" if round_number == 1 else "agent",
@@ -186,26 +246,14 @@ class RoundRunner:
                 hard_stop = rounds_stop
 
         if hard_stop:
-            self._service.transition_round(current_round["id"], RoundState.AWAITING_AGENT)
-            self._service.transition_round(current_round["id"], RoundState.CLOSED)
-            self._service.transition_campaign(campaign_id, CampaignState.COMPLETED)
-            return RunResult("COMPLETED", round_number, hard_stop)
+            return self._complete_after_summary(campaign_id, current_round["id"], round_number, hard_stop)
 
         # Patience check
-        all_summaries = []
-        for r in rounds:
-            s = r.get("summary")
-            if s:
-                if isinstance(s, str):
-                    s = json.loads(s)
-                all_summaries.append(RoundSummary.from_dict(s))
+        all_summaries = self._round_summaries(rounds)
         all_summaries.append(summary)
 
         if Scheduler.check_patience(all_summaries, improvement, campaign["objective_direction"], stop_cond.patience_rounds):
-            self._service.transition_round(current_round["id"], RoundState.AWAITING_AGENT)
-            self._service.transition_round(current_round["id"], RoundState.CLOSED)
-            self._service.transition_campaign(campaign_id, CampaignState.COMPLETED)
-            return RunResult("COMPLETED", round_number, "patience")
+            return self._complete_after_summary(campaign_id, current_round["id"], round_number, "patience")
 
         # Check pause requested
         campaign = self._service.get_campaign(campaign_id)

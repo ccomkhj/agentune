@@ -6,7 +6,7 @@ from typing import Any, Callable, Protocol
 
 import optuna
 
-from agent_hpo.core.models import DatasetSplit, ParamSpec
+from agentune.core.models import DatasetSplit, ParamSpec
 
 
 def suggest_from_param_spec(trial: optuna.Trial, spec: ParamSpec) -> Any:
@@ -30,5 +30,7 @@ class ObjectiveBackend(Protocol):
     ) -> Callable[[optuna.Trial], float]: ...
 
     def default_search_space(self) -> list[ParamSpec]: ...
+
+    def available_params(self) -> list[ParamSpec]: ...
 
     def param_definitions(self) -> list[ParamSpec]: ...
