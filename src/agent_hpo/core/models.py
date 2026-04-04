@@ -184,6 +184,7 @@ class ActionProposal:
     proposed_search_space: list[dict] | None = None
     proposed_budget: int | None = None
     reference_round_ids: list[int] = field(default_factory=list)
+    reasoning: dict | None = None
 
     def validate(self) -> None:
         if self.action in ("narrow_search", "widen_search") and not self.proposed_search_space:

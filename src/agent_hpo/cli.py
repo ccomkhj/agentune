@@ -221,6 +221,145 @@ def history(name):
         db.close()
 
 
+@cli.command()
+@click.argument("name")
+@click.option("--round", "round_num", default=None, type=int, help="Show decision for a specific round only")
+def decisions(name, round_num):
+    """Show agent decision reasoning for each round.
+
+    Displays the full observe → diagnose → decide chain stored in Postgres,
+    showing what the agent saw, how it interpreted the signals, and why it
+    chose a specific action.
+    """
+    db = _get_db()
+    service = CampaignService(db)
+    try:
+        with db.connection() as conn:
+            cur = conn.execute("SELECT * FROM campaigns WHERE name = %s", (name,))
+            campaign = cur.fetchone()
+        if not campaign:
+            click.echo(f"Campaign '{name}' not found", err=True)
+            sys.exit(1)
+
+        data = service.get_campaign_history(campaign["id"])
+        decisions_list = data["decisions"]
+        rounds_list = data["rounds"]
+
+        # Build round number → round mapping
+        round_map = {r["id"]: r for r in rounds_list}
+
+        if not decisions_list:
+            click.echo("No agent decisions recorded yet.")
+            return
+
+        click.echo(f"\n{'#' * 72}")
+        click.echo(f"#  Agent Decision History: {campaign['name']}")
+        click.echo(f"#  {campaign['metric_name']} ({campaign['objective_direction']}) | {campaign['state']}")
+        click.echo(f"{'#' * 72}")
+
+        for d in decisions_list:
+            round_info = round_map.get(d["round_id"])
+            rnum = round_info["round_number"] if round_info else "?"
+
+            if round_num is not None and rnum != round_num:
+                continue
+
+            reasoning = d.get("reasoning")
+            if isinstance(reasoning, str):
+                reasoning = json.loads(reasoning)
+
+            accepted_str = "ACCEPTED" if d["accepted"] else "REJECTED"
+            click.echo(f"\n{'=' * 72}")
+            click.echo(f"  Decision after Round {rnum} | {d['action']} | {accepted_str}")
+            click.echo(f"  {d['created_at']}")
+            click.echo(f"{'=' * 72}")
+
+            if not reasoning:
+                # Legacy decision without structured reasoning
+                click.echo(f"\n  Justification: {d['justification']}")
+                if not d["accepted"]:
+                    click.echo(f"  Rejection: {d['rejection_reason']}")
+                continue
+
+            obs = reasoning.get("observation", {})
+            diag = reasoning.get("diagnosis", {})
+            changes = reasoning.get("search_space_changes", [])
+
+            # --- Observation ---
+            direction_sym = "↓" if obs.get("direction") == "minimize" else "↑"
+            best = obs.get("best_score")
+            best_str = f"{best:.6f}" if best is not None else "N/A"
+            click.echo(f"\n  OBSERVED:")
+            click.echo(f"    {obs.get('metric_name', '?')}: {best_str} {direction_sym} (cumulative best)")
+            rbest = obs.get("round_best_score")
+            if rbest is not None:
+                click.echo(f"    Round best: {rbest:.6f}")
+            delta = obs.get("delta_from_prev")
+            if delta is not None:
+                sign = "+" if delta > 0 else ""
+                click.echo(f"    Delta: {sign}{delta:.6f}")
+            click.echo(f"    New best this round: {obs.get('new_best_in_round', '?')}")
+            click.echo(f"    Trials: {obs.get('round_completed_trials', '?')}/{obs.get('trials_added', '?')}")
+            click.echo(f"    Plateau: {obs.get('plateau_signal', '?')}")
+            gap = obs.get("generalization_gap")
+            if gap is not None:
+                click.echo(f"    Generalization gap: {gap:.4f}")
+
+            top_params = obs.get("top_params", [])
+            if top_params:
+                click.echo(f"\n    Param importance:")
+                for pname, pval in top_params[:5]:
+                    click.echo(f"      {pname:25s} {pval:6.1%}")
+
+            best_params = obs.get("best_params", {})
+            if best_params:
+                click.echo(f"\n    Best params:")
+                for k, v in best_params.items():
+                    if isinstance(v, float):
+                        click.echo(f"      {k:25s} {v:.6f}")
+                    else:
+                        click.echo(f"      {k:25s} {v}")
+
+            # --- Diagnosis ---
+            reasons = diag.get("reasons", [])
+            if reasons:
+                click.echo(f"\n  DIAGNOSIS:")
+                for r in reasons:
+                    click.echo(f"    - {r}")
+
+            # --- Action ---
+            click.echo(f"\n  ACTION: {d['action']}")
+
+            # --- Search space changes ---
+            if changes:
+                click.echo(f"\n  SEARCH SPACE CHANGES:")
+                click.echo(f"    {'Param':25s} {'Old Range':>20s}  →  {'New Range':20s} {'Reason'}")
+                click.echo(f"    {'─' * 25} {'─' * 20}     {'─' * 20} {'─' * 30}")
+                for ch in changes:
+                    if ch.get("param_type") == "categorical":
+                        old_r = "categorical"
+                        new_r = "categorical"
+                    else:
+                        old_r = f"[{ch['old_low']:.4g}, {ch['old_high']:.4g}]"
+                        new_r = f"[{ch['new_low']:.4g}, {ch['new_high']:.4g}]"
+                    click.echo(f"    {ch['param_name']:25s} {old_r:>20s}  →  {new_r:20s} {ch['reason']}")
+
+            budget = d.get("proposed_budget")
+            if budget is not None:
+                click.echo(f"\n  Budget: {budget} trials")
+
+            # --- Justification ---
+            click.echo(f"\n  JUSTIFICATION:")
+            click.echo(f"    {d['justification']}")
+
+            if not d["accepted"]:
+                click.echo(f"\n  REJECTED: {d['rejection_reason']}")
+
+        click.echo()
+    finally:
+        db.close()
+
+
 @cli.command(name="export")
 @click.argument("name")
 def export_cmd(name):

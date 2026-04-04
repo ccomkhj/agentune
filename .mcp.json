@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "agent-hpo": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "python", "-m", "agent_hpo.mcp_server"],
+      "env": {
+        "AGENT_HPO_DB_URL": "postgresql://agent_hpo:agent_hpo@localhost:5432/agent_hpo"
+      }
+    }
+  }
+}

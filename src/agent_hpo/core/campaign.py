@@ -273,8 +273,8 @@ class CampaignService:
             cur = conn.execute(
                 "INSERT INTO agent_decisions "
                 "(campaign_id, round_id, action, justification, proposed_search_space, "
-                "proposed_budget, reference_round_ids, accepted, rejection_reason) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
+                "proposed_budget, reference_round_ids, accepted, rejection_reason, reasoning) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
                 (
                     campaign_id,
                     current_round_id,
@@ -285,6 +285,7 @@ class CampaignService:
                     json.dumps(proposal.reference_round_ids),
                     accepted,
                     reason,
+                    json.dumps(proposal.reasoning) if proposal.reasoning else None,
                 ),
             )
             return cur.fetchone()

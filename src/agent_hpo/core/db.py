@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS agent_decisions (
     reference_round_ids JSONB NOT NULL,
     accepted        BOOLEAN NOT NULL,
     rejection_reason TEXT,
+    reasoning       JSONB,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 """
