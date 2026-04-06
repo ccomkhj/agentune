@@ -474,24 +474,27 @@ def run(name: str, dataset: str, split_seed: int) -> None:
 @click.argument("name")
 @click.option("--dataset", required=True)
 @click.option("--total-trials", required=True, type=int)
+@click.option("--backend", default="xgboost", help="Backend to use (default: xgboost)")
 @click.option("--split-seed", default=42, type=int)
 @click.option("--sampler-seed", default=42, type=int)
 def baseline(
     name: str,
     dataset: str,
     total_trials: int,
+    backend: str,
     split_seed: int,
     sampler_seed: int,
 ) -> None:
     """Run a plain Optuna baseline with the same budget for comparison."""
     import optuna
     from agentune.datasets import load_dataset
-    from agentune.backends.xgboost import XGBoostBackend
+    from agentune.backends import get_backend
 
     split, meta = load_dataset(dataset, seed=split_seed)
-    backend = XGBoostBackend()
-    search_space = backend.default_search_space()
-    objective = backend.create_objective(split, meta["metric"], search_space)
+    backend_cls = get_backend(backend)
+    backend_obj = backend_cls()
+    search_space = backend_obj.default_search_space()
+    objective = backend_obj.create_objective(split, meta["metric"], search_space)
 
     study = optuna.create_study(
         direction=meta["direction"],
@@ -501,5 +504,5 @@ def baseline(
     study.optimize(objective, n_trials=total_trials, show_progress_bar=True)
     wall_time = time.time() - start
 
-    click.echo(f"Baseline '{name}': best={study.best_value:.4f} trials={total_trials} time={wall_time:.1f}s")
+    click.echo(f"Baseline '{name}' ({backend}): best={study.best_value:.4f} trials={total_trials} time={wall_time:.1f}s")
     click.echo(f"Best params: {json.dumps(study.best_params, indent=2)}")
