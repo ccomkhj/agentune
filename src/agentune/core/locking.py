@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 import uuid
 from datetime import timedelta
+
+logger = logging.getLogger(__name__)
 
 from agentune.core.db import Database
 
@@ -52,3 +56,34 @@ class LeaseManager:
                 "WHERE id = %s AND claimed_by = %s",
                 (campaign_id, self.worker_id),
             )
+
+
+class LeaseRefresher:
+    """Context manager that refreshes a lease in a background thread."""
+
+    def __init__(self, lease: LeaseManager, campaign_id: int,
+                 interval_seconds: float = REFRESH_INTERVAL.total_seconds()) -> None:
+        self._lease = lease
+        self._campaign_id = campaign_id
+        self._interval = interval_seconds
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def _run(self) -> None:
+        while not self._stop.wait(timeout=self._interval):
+            try:
+                self._lease.refresh(self._campaign_id)
+            except Exception:
+                logger.warning("Lease refresh failed for campaign %s",
+                             self._campaign_id, exc_info=True)
+
+    def __enter__(self) -> LeaseRefresher:
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)

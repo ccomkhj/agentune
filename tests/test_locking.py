@@ -1,6 +1,10 @@
+import time
+
 import pytest
+from unittest.mock import MagicMock
+
 from agentune.core.db import Database
-from agentune.core.locking import LeaseManager, LeaseError
+from agentune.core.locking import LeaseManager, LeaseError, LeaseRefresher
 
 
 @pytest.fixture
@@ -71,3 +75,26 @@ class TestLeaseManager:
             second_expiry = cur.fetchone()["claim_expires_at"]
         assert second_expiry > first_expiry
         lm.release(campaign_id)
+
+
+class TestLeaseRefresher:
+    def test_refresher_calls_refresh_periodically(self):
+        lease = MagicMock()
+        with LeaseRefresher(lease, campaign_id=1, interval_seconds=0.1):
+            time.sleep(0.35)
+        assert lease.refresh.call_count >= 2
+
+    def test_refresher_stops_cleanly(self):
+        lease = MagicMock()
+        refresher = LeaseRefresher(lease, campaign_id=1, interval_seconds=0.1)
+        refresher.__enter__()
+        time.sleep(0.15)
+        refresher.__exit__(None, None, None)
+        assert not refresher._thread.is_alive()
+
+    def test_refresher_survives_refresh_failure(self):
+        lease = MagicMock()
+        lease.refresh.side_effect = [Exception("db error"), None, None]
+        with LeaseRefresher(lease, campaign_id=1, interval_seconds=0.1):
+            time.sleep(0.35)
+        assert lease.refresh.call_count >= 2
