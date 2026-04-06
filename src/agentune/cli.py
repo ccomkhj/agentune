@@ -98,6 +98,7 @@ def cli() -> None:
 @click.option("--sampler-seed", default=42, type=int)
 @click.option("--split-seed", default=42, type=int)
 @click.option("--target", default="target", help="Target column name for custom CSV/parquet datasets")
+@click.option("--n-jobs", default=1, type=int, help="Number of parallel trial workers (default: 1)")
 def init(
     name: str,
     backend: str,
@@ -115,6 +116,7 @@ def init(
     sampler_seed: int,
     split_seed: int,
     target: str,
+    n_jobs: int,
 ) -> None:
     """Create a new optimization campaign."""
     from agentune.datasets import DATASETS, _is_file_path
@@ -174,6 +176,7 @@ def init(
         trials_per_round=trials_per_round,
         dataset=dataset,
         split_seed=split_seed,
+        n_jobs=n_jobs,
     )
 
     try:

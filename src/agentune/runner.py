@@ -30,6 +30,7 @@ def _get_mlflow():
     return _mlflow
 
 from agentune.backends import get_backend
+from agentune.parallel import ParallelOptimizer
 from agentune.core.campaign import CampaignService
 from agentune.core.db import Database
 from agentune.core.locking import LeaseManager, LeaseRefresher
@@ -308,8 +309,10 @@ class RoundRunner:
         lease.refresh(campaign_id)
 
         trial_offset = current_round["trial_offset"]
+        n_jobs = campaign.get("n_jobs", 1)
+        optimizer = ParallelOptimizer(n_jobs=n_jobs)
         with LeaseRefresher(lease, campaign_id):
-            study.optimize(objective, n_trials=effective_budget, timeout=optuna_timeout, show_progress_bar=False)
+            optimizer.optimize(study, objective, n_trials=effective_budget, timeout=optuna_timeout)
         trial_end = len(study.trials)
 
         self._service.complete_round_execution(current_round["id"], trial_end=trial_end)
