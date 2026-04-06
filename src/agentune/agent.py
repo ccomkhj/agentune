@@ -505,6 +505,19 @@ class AgentReasoner:
         # Not improving + already narrowed → check if we should widen or stop
         if not diag.is_improving and last_structural == "narrow_search":
             no_improve_rounds = self._count_no_improvement(prev_summaries, obs)
+
+            # If params hitting boundaries after narrow, widen to escape
+            if diag.best_params_at_boundary:
+                widen_changes = self._build_widen_changes(obs, current_space)
+                if widen_changes:
+                    boundary_names = ", ".join(diag.best_params_at_boundary)
+                    return "widen_search", widen_changes, None, (
+                        f"After {round_ref}: no improvement ({obs.metric_name}={_fmt(obs.best_score)}) "
+                        f"after narrowing. "
+                        f"Best params at boundary: {boundary_names}. "
+                        f"Widening search space to escape boundary constraints."
+                    )
+
             if no_improve_rounds >= 2:
                 return "stop", [], None, (
                     f"After {round_ref}: {obs.metric_name}={_fmt(obs.best_score)} unchanged "
@@ -567,6 +580,68 @@ class AgentReasoner:
                 new_low = old_low  # preserve log-scale validity
 
             if new_low < new_high:
+                changes.append(SearchSpaceChange(
+                    param_name=name,
+                    param_type=ptype,
+                    old_low=old_low,
+                    old_high=old_high,
+                    new_low=new_low,
+                    new_high=new_high,
+                    best_value=best_val,
+                    importance=importance,
+                    reason=reason,
+                ))
+
+        return changes
+
+    def _build_widen_changes(
+        self,
+        obs: Observation,
+        current_space: list[dict],
+    ) -> list[SearchSpaceChange]:
+        """Build widened search space changes for params where best value is at boundary."""
+        changes = []
+        importance_map = dict(obs.top_params)
+
+        for spec in current_space:
+            name = spec["name"]
+            ptype = spec.get("type", "float")
+            importance = importance_map.get(name, 0)
+            best_val = obs.best_params.get(name)
+
+            if ptype == "categorical" or best_val is None:
+                continue
+
+            old_low = spec.get("low")
+            old_high = spec.get("high")
+            if old_low is None or old_high is None:
+                continue
+
+            if not self._is_at_boundary(float(best_val), old_low, old_high):
+                continue
+
+            is_log = spec.get("log", False)
+
+            # Expand by 1.5x for high-importance params, 1.3x otherwise
+            expand_factor = 1.5 if importance >= 0.20 else 1.3
+            old_range = old_high - old_low
+            new_half_range = old_range * expand_factor / 2
+            midpoint = (old_low + old_high) / 2
+            new_low = midpoint - new_half_range
+            new_high = midpoint + new_half_range
+
+            # Handle log params: ensure new_low > 0
+            if is_log and new_low <= 0:
+                new_low = old_low * 0.1
+
+            # Handle int types
+            if ptype == "int":
+                import math
+                new_low = math.floor(new_low)
+                new_high = math.ceil(new_high)
+
+            if new_low < new_high:
+                reason = f"importance={importance:.1%}, best_value={best_val} at boundary, expanding by {expand_factor}x"
                 changes.append(SearchSpaceChange(
                     param_name=name,
                     param_type=ptype,

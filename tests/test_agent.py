@@ -234,6 +234,18 @@ class TestAgentReasonerChooseAction:
             round_id=2,
             new_best_in_round=False,
             delta_from_prev=0.0,
+            # Ensure no params are at boundary so widen_search is not triggered
+            best_params={
+                "learning_rate": 0.1,
+                "max_depth": 5,
+                "n_estimators": 200,
+                "subsample": 0.75,
+                "colsample_bytree": 0.75,
+                "min_child_weight": 5.0,
+                "gamma": 2.5,
+                "reg_alpha": 1.0,   # midpoint of (1e-8, 10.0) range — not at boundary
+                "reg_lambda": 1.0,  # midpoint of (1e-8, 10.0) range — not at boundary
+            },
         )
         prev_decisions = [
             {"action": "narrow_search", "accepted": True},
@@ -247,3 +259,138 @@ class TestAgentReasonerChooseAction:
         )
         assert decision.action == "continue"
         assert "1 round" in decision.justification or "only" in decision.justification.lower()
+
+
+class TestWidenSearch:
+
+    def setup_method(self):
+        self.reasoner = AgentReasoner()
+
+    def test_widens_when_boundary_hit_after_narrow(self):
+        """Not improving + last_structural=narrow + best params at boundary → widen_search."""
+        # max_depth=15 at edge of [10, 15] — clearly at boundary
+        narrowed_space = [
+            {"name": "learning_rate", "type": "float", "low": 0.05, "high": 0.2, "log": True},
+            {"name": "max_depth", "type": "int", "low": 10, "high": 15},
+            {"name": "n_estimators", "type": "int", "low": 100, "high": 300},
+        ]
+        current_summary = _make_summary(
+            round_id=3,
+            new_best_in_round=False,
+            delta_from_prev=0.0,
+            best_params={
+                "learning_rate": 0.1,
+                "max_depth": 15,  # at upper boundary
+                "n_estimators": 200,
+            },
+            param_ranges_used={
+                "learning_rate": (0.05, 0.2),
+                "max_depth": (10, 15),
+                "n_estimators": (100, 300),
+            },
+            param_importance={
+                "learning_rate": 0.25,
+                "max_depth": 0.40,
+                "n_estimators": 0.10,
+            },
+        )
+        prev_decisions = [
+            {"action": "narrow_search", "accepted": True},
+        ]
+        decision = self.reasoner.decide(
+            summary=current_summary,
+            round_number=3,
+            current_search_space=narrowed_space,
+            prev_summaries=[],
+            prev_decisions=prev_decisions,
+        )
+        assert decision.action == "widen_search"
+        assert "boundary" in decision.justification.lower() or "max_depth" in decision.justification
+
+    def test_widen_expands_ranges(self):
+        """Verify widened ranges are >= original ranges for boundary-hit params."""
+        narrowed_space = [
+            {"name": "learning_rate", "type": "float", "low": 0.05, "high": 0.2, "log": True},
+            {"name": "max_depth", "type": "int", "low": 10, "high": 15},
+        ]
+        current_summary = _make_summary(
+            round_id=3,
+            new_best_in_round=False,
+            delta_from_prev=0.0,
+            best_params={
+                "learning_rate": 0.1,
+                "max_depth": 15,  # at upper boundary
+            },
+            param_ranges_used={
+                "learning_rate": (0.05, 0.2),
+                "max_depth": (10, 15),
+            },
+            param_importance={
+                "learning_rate": 0.10,
+                "max_depth": 0.40,
+            },
+        )
+        prev_decisions = [
+            {"action": "narrow_search", "accepted": True},
+        ]
+        decision = self.reasoner.decide(
+            summary=current_summary,
+            round_number=3,
+            current_search_space=narrowed_space,
+            prev_summaries=[],
+            prev_decisions=prev_decisions,
+        )
+        assert decision.action == "widen_search"
+        assert decision.proposed_search_space is not None
+
+        # Build a map from name to new spec
+        new_space_map = {s["name"]: s for s in decision.proposed_search_space}
+        old_space_map = {s["name"]: s for s in narrowed_space}
+
+        # max_depth is at boundary — its new range should be wider
+        old_depth = old_space_map["max_depth"]
+        new_depth = new_space_map["max_depth"]
+        old_range = old_depth["high"] - old_depth["low"]
+        new_range = new_depth["high"] - new_depth["low"]
+        assert new_range >= old_range, f"Expected wider range for max_depth, got {new_range} <= {old_range}"
+
+    def test_no_widen_when_no_boundary_hit(self):
+        """Best params NOT at boundary + after narrow → continue (not widen)."""
+        narrowed_space = [
+            {"name": "learning_rate", "type": "float", "low": 0.01, "high": 0.5, "log": True},
+            {"name": "max_depth", "type": "int", "low": 1, "high": 10},
+            {"name": "n_estimators", "type": "int", "low": 50, "high": 500},
+        ]
+        current_summary = _make_summary(
+            round_id=3,
+            new_best_in_round=False,
+            delta_from_prev=0.0,
+            best_params={
+                "learning_rate": 0.1,   # well within [0.01, 0.5]
+                "max_depth": 5,          # well within [1, 10]
+                "n_estimators": 200,     # well within [50, 500]
+            },
+            param_ranges_used={
+                "learning_rate": (0.01, 0.5),
+                "max_depth": (1, 10),
+                "n_estimators": (50, 500),
+            },
+            param_importance={
+                "learning_rate": 0.25,
+                "max_depth": 0.20,
+                "n_estimators": 0.10,
+            },
+        )
+        prev_decisions = [
+            {"action": "narrow_search", "accepted": True},
+        ]
+        decision = self.reasoner.decide(
+            summary=current_summary,
+            round_number=3,
+            current_search_space=narrowed_space,
+            prev_summaries=[],  # only 1 round since narrow
+            prev_decisions=prev_decisions,
+        )
+        # No boundary hit → should not widen; with only 1 round since narrow → continue
+        assert decision.action != "widen_search"
+        assert decision.action == "continue"
