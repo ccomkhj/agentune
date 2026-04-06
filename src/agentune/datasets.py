@@ -168,6 +168,53 @@ def _load_ts_dataset(
     return X_train, y_train, X_val, y_val, X_test, y_test
 
 
+def load_custom_dataset(
+    path: str,
+    target: str = "target",
+    seed: int = 42,
+) -> DatasetSplit:
+    """Load a custom CSV or parquet file as a dataset.
+
+    Args:
+        path: Path to CSV or parquet file.
+        target: Name of the target column.
+        seed: Random seed for train/val/test split (60/20/20).
+
+    Returns:
+        DatasetSplit with 60/20/20 split.
+    """
+    if path.endswith(".parquet"):
+        df = pd.read_parquet(path)
+    else:
+        df = pd.read_csv(path)
+
+    if target not in df.columns:
+        raise ValueError(
+            f"Target column '{target}' not found. Available columns: {list(df.columns)}"
+        )
+
+    y = df[target].to_numpy()
+    X = df.drop(columns=[target])
+
+    # Encode string/categorical columns
+    for col in X.columns:
+        if X[col].dtype == object or X[col].dtype.name == "category":
+            X[col] = LabelEncoder().fit_transform(X[col].astype(str))
+
+    X_arr = X.to_numpy(dtype=np.float64)
+
+    # Fill NaNs with column median
+    for col_idx in range(X_arr.shape[1]):
+        mask = np.isnan(X_arr[:, col_idx])
+        if mask.any():
+            X_arr[mask, col_idx] = np.nanmedian(X_arr[:, col_idx])
+
+    X_train, X_temp, y_train, y_temp = train_test_split(X_arr, y, test_size=0.4, random_state=seed)
+    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=seed)
+
+    return DatasetSplit(X_train, y_train, X_val, y_val, X_test, y_test)
+
+
 def load_dataset(name: str, seed: int = 42) -> tuple[DatasetSplit, dict]:
     """Load a dataset with consistent splits. Returns (split, metadata)."""
     info = DATASETS[name]
