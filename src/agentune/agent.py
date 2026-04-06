@@ -534,6 +534,16 @@ class AgentReasoner:
                     ), None
 
             if no_improve_rounds >= 2:
+                # Multi-round plateau + no dominant param → revise instead of stop
+                if (diag.is_plateauing and not diag.dominant_param and available_params):
+                    revised = self._build_revise_proposal(obs, current_space, available_params)
+                    if revised:
+                        return "revise_search", [], None, (
+                            f"After {round_ref}: {obs.metric_name}={_fmt(obs.best_score)} unchanged "
+                            f"for {no_improve_rounds} rounds with plateau and no dominant parameter. "
+                            f"Revising search space to explore different parameter combinations."
+                        ), revised
+
                 return "stop", [], None, (
                     f"After {round_ref}: {obs.metric_name}={_fmt(obs.best_score)} unchanged "
                     f"for {no_improve_rounds} rounds after narrowing. "

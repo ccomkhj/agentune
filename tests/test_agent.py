@@ -547,3 +547,87 @@ class TestReviseSearch:
         added = proposed_names - current_names
         dropped = current_names - proposed_names
         assert len(added) + len(dropped) <= 3
+
+
+# ---------------------------------------------------------------------------
+# Integration test: full decision tree coverage
+# ---------------------------------------------------------------------------
+
+class TestDecisionTreeCompleteness:
+
+    def test_all_actions_reachable(self):
+        """Smoke test: each action type is produced under some conditions."""
+        reasoner = AgentReasoner()
+        actions_seen = set()
+
+        # stop (failures)
+        d = reasoner.decide(_make_summary(failure_rate=0.15), 3, DEFAULT_SEARCH_SPACE)
+        actions_seen.add(d.action)
+
+        # narrow_search (round 1)
+        d = reasoner.decide(_make_summary(), 1, DEFAULT_SEARCH_SPACE)
+        actions_seen.add(d.action)
+
+        # continue (significant improvement)
+        d = reasoner.decide(
+            _make_summary(best_score=0.85, delta_from_prev=-0.02, new_best_in_round=True),
+            3, DEFAULT_SEARCH_SPACE,
+        )
+        actions_seen.add(d.action)
+
+        # increase_budget (improving + plateau)
+        d = reasoner.decide(
+            _make_summary(best_score=0.85, delta_from_prev=-0.005, new_best_in_round=True, plateau_signal=True),
+            3, DEFAULT_SEARCH_SPACE,
+        )
+        actions_seen.add(d.action)
+
+        # widen_search (after narrow, boundary hit)
+        narrowed = [
+            {"name": "max_depth", "type": "int", "low": 10, "high": 15},
+            {"name": "learning_rate", "type": "float", "low": 0.05, "high": 0.2, "log": True},
+        ]
+        d = reasoner.decide(
+            _make_summary(
+                new_best_in_round=False, delta_from_prev=0.0,
+                best_params={"max_depth": 15, "learning_rate": 0.2},
+                param_importance={"max_depth": 0.3, "learning_rate": 0.3},
+                param_ranges_used={"max_depth": (10, 15), "learning_rate": (0.05, 0.2)},
+            ),
+            3, narrowed,
+            prev_decisions=[{"action": "narrow_search", "accepted": True}],
+        )
+        actions_seen.add(d.action)
+
+        # revise_search (multi-round plateau, no dominant)
+        prev1 = _make_summary(round_id=2, new_best_in_round=False)
+        prev2 = _make_summary(round_id=3, new_best_in_round=False)
+        d = reasoner.decide(
+            _make_summary(
+                round_id=4, new_best_in_round=False, delta_from_prev=0.0,
+                plateau_signal=True,
+                param_importance={k: 0.05 for k in ["max_depth", "learning_rate", "n_estimators",
+                                                     "subsample", "colsample_bytree", "gamma",
+                                                     "reg_alpha", "reg_lambda", "min_child_weight"]},
+                # best_params well away from boundaries so widen_search is not triggered
+                best_params={
+                    "learning_rate": 0.1,
+                    "max_depth": 5,
+                    "n_estimators": 200,
+                    "subsample": 0.75,
+                    "colsample_bytree": 0.75,
+                    "min_child_weight": 5.0,
+                    "gamma": 2.5,
+                    "reg_alpha": 1.0,
+                    "reg_lambda": 1.0,
+                },
+            ),
+            4, DEFAULT_SEARCH_SPACE,
+            prev_summaries=[prev1, prev2],
+            prev_decisions=[{"action": "narrow_search", "accepted": True}],
+            available_params=_xgboost_all_params(),
+        )
+        actions_seen.add(d.action)
+
+        expected = {"stop", "continue", "narrow_search", "increase_budget", "widen_search", "revise_search"}
+        assert actions_seen == expected, f"Missing actions: {expected - actions_seen}"
