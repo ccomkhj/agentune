@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from agentune.datasets import load_custom_dataset
+from agentune.datasets import load_custom_dataset, load_dataset
 from agentune.core.models import DatasetSplit
 
 
@@ -73,3 +73,39 @@ class TestLoadCustomDataset:
         assert total == 1000
         assert abs(len(split.y_train) / 1000 - 0.6) < 0.02
         assert abs(len(split.y_val) / 1000 - 0.2) < 0.02
+
+
+class TestLoadDatasetWithCustomPath:
+    def test_file_path_loads_custom_dataset(self, tmp_path):
+        df = pd.DataFrame({
+            "x": np.random.randn(100),
+            "target": np.random.randint(0, 2, 100),
+        })
+        path = tmp_path / "custom.csv"
+        df.to_csv(path, index=False)
+        split, meta = load_dataset(str(path), seed=42)
+        assert isinstance(split, DatasetSplit)
+        assert meta["metric"] is None
+        assert meta["direction"] is None
+
+    def test_file_path_with_descriptor_metadata(self, tmp_path):
+        df = pd.DataFrame({
+            "feat": np.random.randn(100),
+            "label": np.random.randint(0, 2, 100),
+        })
+        path = tmp_path / "custom.csv"
+        df.to_csv(path, index=False)
+        descriptor = f"{path}:target=label:metric=accuracy:direction=maximize"
+        split, meta = load_dataset(descriptor, seed=42)
+        assert isinstance(split, DatasetSplit)
+        assert meta["metric"] == "accuracy"
+        assert meta["direction"] == "maximize"
+
+    def test_builtin_dataset_still_works(self):
+        split, meta = load_dataset("breast_cancer", seed=42)
+        assert isinstance(split, DatasetSplit)
+        assert meta["metric"] == "accuracy"
+
+    def test_unknown_builtin_raises(self):
+        with pytest.raises(ValueError, match="Unknown dataset"):
+            load_dataset("nonexistent_dataset")

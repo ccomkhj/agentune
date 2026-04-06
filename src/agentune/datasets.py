@@ -215,9 +215,44 @@ def load_custom_dataset(
     return DatasetSplit(X_train, y_train, X_val, y_val, X_test, y_test)
 
 
+def _parse_custom_descriptor(name: str) -> tuple[str, dict]:
+    """Parse 'path.csv:target=col:metric=rmse:direction=minimize' into (path, options)."""
+    parts = name.split(":")
+    path = parts[0]
+    options = {}
+    for part in parts[1:]:
+        if "=" in part:
+            key, val = part.split("=", 1)
+            options[key] = val
+    return path, options
+
+
+def _is_file_path(name: str) -> bool:
+    """Check if name looks like a file path (has extension or path separator)."""
+    base = name.split(":")[0]  # strip descriptor suffix
+    return "." in base and ("/" in base or os.path.exists(base))
+
+
 def load_dataset(name: str, seed: int = 42) -> tuple[DatasetSplit, dict]:
-    """Load a dataset with consistent splits. Returns (split, metadata)."""
-    info = DATASETS[name]
+    """Load a dataset with consistent splits. Returns (split, metadata).
+
+    name can be:
+      - A built-in name: 'breast_cancer', 'california_housing', etc.
+      - A file path: '/path/to/data.csv' or '/path/to/data.parquet'
+      - A descriptor: '/path/to/data.csv:target=label:metric=accuracy:direction=maximize'
+    """
+    if _is_file_path(name):
+        path, options = _parse_custom_descriptor(name)
+        target = options.get("target", "target")
+        split = load_custom_dataset(path, target=target, seed=seed)
+        return split, {
+            "metric": options.get("metric"),
+            "direction": options.get("direction"),
+        }
+
+    info = DATASETS.get(name)
+    if info is None:
+        raise ValueError(f"Unknown dataset '{name}'. Available: {', '.join(DATASETS)}")
 
     # Time-series datasets: split first, then preprocess (no data leakage)
     if info.get("temporal"):
