@@ -20,8 +20,6 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-[project.urls]
-Repository = "https://github.com/huijokim/agentune"
 dependencies = [
     "optuna>=3.6,<4",
     "psycopg[binary]>=3.1,<4",
@@ -37,6 +35,9 @@ dependencies = [
     "mlforecast>=1.0.0",
     "mlflow>=3.10,<4",
 ]
+
+[project.urls]
+Repository = "https://github.com/huijokim/agentune"
 
 [project.optional-dependencies]
 dev = [
