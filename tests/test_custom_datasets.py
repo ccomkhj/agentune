@@ -109,3 +109,26 @@ class TestLoadDatasetWithCustomPath:
     def test_unknown_builtin_raises(self):
         with pytest.raises(ValueError, match="Unknown dataset"):
             load_dataset("nonexistent_dataset")
+
+
+class TestInitWithCustomDataset:
+    def test_init_accepts_target_option(self):
+        from click.testing import CliRunner
+        from agentune.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["init", "--help"])
+        assert "--target" in result.output
+
+    def test_init_requires_metric_for_custom_dataset(self, tmp_path):
+        from click.testing import CliRunner
+        from agentune.cli import cli
+
+        df = pd.DataFrame({"x": range(10), "target": range(10)})
+        path = tmp_path / "data.csv"
+        df.to_csv(path, index=False)
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "init", "test-custom", "--dataset", str(path), "--backend", "xgboost",
+        ])
+        assert result.exit_code != 0 or "metric" in result.output.lower()

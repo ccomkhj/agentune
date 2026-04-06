@@ -97,6 +97,7 @@ def cli() -> None:
 @click.option("--improvement-threshold", default=0.0, type=float)
 @click.option("--sampler-seed", default=42, type=int)
 @click.option("--split-seed", default=42, type=int)
+@click.option("--target", default="target", help="Target column name for custom CSV/parquet datasets")
 def init(
     name: str,
     backend: str,
@@ -113,32 +114,41 @@ def init(
     improvement_threshold: float,
     sampler_seed: int,
     split_seed: int,
+    target: str,
 ) -> None:
     """Create a new optimization campaign."""
-    from agentune.datasets import DATASETS
+    from agentune.datasets import DATASETS, _is_file_path
 
-    dataset_info = DATASETS.get(dataset)
-    if dataset_info is None:
-        _exit_with_error(f"Unknown dataset '{dataset}'. Available: {', '.join(DATASETS)}")
+    if _is_file_path(dataset):
+        if metric is None:
+            _exit_with_error("Custom dataset requires --metric (accuracy, rmse, log_loss)")
+        if direction is None:
+            _exit_with_error("Custom dataset requires --direction (minimize or maximize)")
+        # Encode target into descriptor for run_next_round
+        dataset = f"{dataset}:target={target}"
+    else:
+        dataset_info = DATASETS.get(dataset)
+        if dataset_info is None:
+            _exit_with_error(f"Unknown dataset '{dataset}'. Available: {', '.join(DATASETS)}")
 
-    canonical_metric = dataset_info["metric"]
-    canonical_direction = dataset_info["direction"]
+        canonical_metric = dataset_info["metric"]
+        canonical_direction = dataset_info["direction"]
 
-    if metric is None:
-        metric = canonical_metric
-    elif metric != canonical_metric:
-        click.echo(
-            f"Warning: dataset '{dataset}' is typically used with metric "
-            f"'{canonical_metric}', but you specified '{metric}'."
-        )
+        if metric is None:
+            metric = canonical_metric
+        elif metric != canonical_metric:
+            click.echo(
+                f"Warning: dataset '{dataset}' is typically used with metric "
+                f"'{canonical_metric}', but you specified '{metric}'."
+            )
 
-    if direction is None:
-        direction = canonical_direction
-    elif direction != canonical_direction:
-        click.echo(
-            f"Warning: dataset '{dataset}' is typically used with direction "
-            f"'{canonical_direction}', but you specified '{direction}'."
-        )
+        if direction is None:
+            direction = canonical_direction
+        elif direction != canonical_direction:
+            click.echo(
+                f"Warning: dataset '{dataset}' is typically used with direction "
+                f"'{canonical_direction}', but you specified '{direction}'."
+            )
 
     db = _get_db()
     service = CampaignService(db)
