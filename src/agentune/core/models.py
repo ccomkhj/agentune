@@ -113,8 +113,9 @@ class CampaignConfig:
     improvement_criteria: ImprovementCriteria
     stop_conditions: StopConditions
     trials_per_round: int
-    dataset: str
+    dataset: str | None = None
     split_seed: int = 42
+    n_jobs: int = 1
 
 
 @dataclass

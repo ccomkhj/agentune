@@ -39,8 +39,8 @@ class CampaignService:
                 "INSERT INTO campaigns "
                 "(name, metric_name, objective_direction, backend, sampler_config, "
                 "initial_search_space, improvement_criteria, stop_conditions, trials_per_round, "
-                "dataset, split_seed) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
+                "dataset, split_seed, n_jobs) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
                 (
                     name,
                     config.metric_name,
@@ -53,6 +53,7 @@ class CampaignService:
                     config.trials_per_round,
                     config.dataset,
                     config.split_seed,
+                    config.n_jobs,
                 ),
             )
             campaign = cur.fetchone()
