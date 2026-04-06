@@ -383,6 +383,7 @@ class AgentReasoner:
         current_search_space: list[dict],
         prev_summaries: list[RoundSummary] | None = None,
         prev_decisions: list[dict] | None = None,
+        available_params: list[dict] | None = None,
     ) -> AgentDecision:
         """Main entry point: observe, diagnose, decide, justify."""
         obs = self.observe(summary, round_number)
@@ -404,11 +405,12 @@ class AgentReasoner:
                     break
 
         # Decision logic
-        action, changes, budget, justification = self._choose_action(
-            obs, diag, current_search_space, last_structural, prev_summaries or []
+        action, changes, budget, justification, revised_space = self._choose_action(
+            obs, diag, current_search_space, last_structural, prev_summaries or [],
+            available_params=available_params,
         )
 
-        proposed_space = None
+        proposed_space = revised_space
         if changes:
             proposed_space = self._apply_changes(current_search_space, changes)
 
@@ -432,8 +434,9 @@ class AgentReasoner:
         current_space: list[dict],
         last_structural: str | None,
         prev_summaries: list[RoundSummary],
-    ) -> tuple[str, list[SearchSpaceChange], int | None, str]:
-        """Choose action based on diagnosis. Returns (action, changes, budget, justification)."""
+        available_params: list[dict] | None = None,
+    ) -> tuple[str, list[SearchSpaceChange], int | None, str, list[dict] | None]:
+        """Choose action based on diagnosis. Returns (action, changes, budget, justification, revised_space)."""
         round_ref = f"round {obs.round_number} (id={obs.round_id})"
 
         # High failure rate → stop (something is broken)
@@ -441,7 +444,7 @@ class AgentReasoner:
             return "stop", [], None, (
                 f"After {round_ref}: failure_rate={obs.failure_rate:.1%} exceeds threshold. "
                 f"Search space or data configuration may be broken."
-            )
+            ), None
 
         # First round → narrow based on observed param importance
         if obs.round_number == 1 and not diag.search_space_exhausted:
@@ -457,7 +460,7 @@ class AgentReasoner:
                 if diag.is_overfitting:
                     reason_parts.append(f"overfitting ({diag.overfitting_severity}): gap={obs.generalization_gap:.4f}")
                 reason_parts.append("Narrowing search space around best parameter values to focus exploration")
-                return "narrow_search", changes, None, ". ".join(reason_parts)
+                return "narrow_search", changes, None, ". ".join(reason_parts), None
 
         # Improving significantly → continue
         if diag.is_improving and diag.improvement_magnitude == "significant":
@@ -465,7 +468,7 @@ class AgentReasoner:
             return "continue", [], None, (
                 f"After {round_ref}: {obs.metric_name} improved to {_fmt(obs.best_score)}{delta_str}. "
                 f"Significant improvement — continue exploring this search space."
-            )
+            ), None
 
         # Improving but plateauing → increase budget
         if diag.is_improving and diag.is_plateauing:
@@ -474,7 +477,7 @@ class AgentReasoner:
                 f"After {round_ref}: {obs.metric_name} improved to {_fmt(obs.best_score)} "
                 f"but plateau detected. Increasing budget from {obs.trials_added} to {new_budget} "
                 f"to give TPE sampler more chances in this space."
-            )
+            ), None
 
         # Improving slightly → continue
         if diag.is_improving:
@@ -482,17 +485,29 @@ class AgentReasoner:
             return "continue", [], None, (
                 f"After {round_ref}: {obs.metric_name} improved to {_fmt(obs.best_score)}{delta_str}. "
                 f"Still making progress — continue with same space."
-            )
+            ), None
 
         # Not improving + can narrow (no recent structural or cooldown passed)
         if not diag.is_improving and last_structural != "narrow_search":
             no_improve_rounds = self._count_no_improvement(prev_summaries, obs)
+
+            # Multi-round plateau + no dominant param → revise
+            if (no_improve_rounds >= 2 and diag.is_plateauing
+                    and not diag.dominant_param and available_params):
+                revised = self._build_revise_proposal(obs, current_space, available_params)
+                if revised:
+                    return "revise_search", [], None, (
+                        f"After {round_ref}: {obs.metric_name}={_fmt(obs.best_score)} unchanged "
+                        f"for {no_improve_rounds} rounds with plateau and no dominant parameter. "
+                        f"Revising search space to explore different parameter combinations."
+                    ), revised
+
             if no_improve_rounds >= 2:
                 # 2+ rounds no improvement → stop
                 return "stop", [], None, (
                     f"After {round_ref}: {obs.metric_name}={_fmt(obs.best_score)} unchanged "
                     f"for {no_improve_rounds} consecutive rounds. Diminishing returns — stopping."
-                )
+                ), None
             else:
                 # Try narrowing
                 changes = self._build_narrow_changes(obs, current_space)
@@ -500,7 +515,7 @@ class AgentReasoner:
                     return "narrow_search", changes, None, (
                         f"After {round_ref}: no improvement ({obs.metric_name}={_fmt(obs.best_score)}). "
                         f"Narrowing search space to focus on promising parameter region."
-                    )
+                    ), None
 
         # Not improving + already narrowed → check if we should widen or stop
         if not diag.is_improving and last_structural == "narrow_search":
@@ -516,26 +531,87 @@ class AgentReasoner:
                         f"after narrowing. "
                         f"Best params at boundary: {boundary_names}. "
                         f"Widening search space to escape boundary constraints."
-                    )
+                    ), None
 
             if no_improve_rounds >= 2:
                 return "stop", [], None, (
                     f"After {round_ref}: {obs.metric_name}={_fmt(obs.best_score)} unchanged "
                     f"for {no_improve_rounds} rounds after narrowing. "
                     f"Search space is exhausted — stopping."
-                )
+                ), None
             else:
                 return "continue", [], None, (
                     f"After {round_ref}: no improvement yet ({obs.metric_name}={_fmt(obs.best_score)}) "
                     f"but only 1 round since narrowing. "
                     f"Continue to give TPE more data in the focused region."
-                )
+                ), None
 
         # Default: continue
         return "continue", [], None, (
             f"After {round_ref}: {obs.metric_name}={_fmt(obs.best_score)}. "
             f"Continuing exploration."
+        ), None
+
+    def _build_revise_proposal(
+        self,
+        obs: Observation,
+        current_space: list[dict],
+        available_params: list[dict],
+    ) -> list[dict] | None:
+        """Drop low-importance params, add new ones from catalog.
+
+        Returns full proposed search space as list[dict], or None if no valid
+        revision is possible.
+        """
+        MIN_PARAMS = 5
+        MAX_CHURN = 3
+
+        importance_map = dict(obs.top_params)
+        current_names = {spec["name"] for spec in current_space}
+
+        # Sort current params by importance ascending (lowest first = drop candidates)
+        sorted_current = sorted(
+            current_space,
+            key=lambda s: importance_map.get(s["name"], 0),
         )
+
+        # Identify params eligible to drop (importance < 0.05)
+        drop_candidates = [
+            s for s in sorted_current
+            if importance_map.get(s["name"], 0) < 0.05
+        ]
+
+        # Find params from catalog that are not in current space
+        add_candidates = [
+            p for p in available_params
+            if p["name"] not in current_names
+        ]
+
+        if not add_candidates:
+            return None  # nothing new to add
+
+        # Determine how many to drop (up to 2, but keep at least MIN_PARAMS)
+        max_droppable = max(0, len(current_space) - MIN_PARAMS)
+        num_drop = min(len(drop_candidates), 2, max_droppable)
+
+        # Determine how many to add (1-2, but total churn <= MAX_CHURN)
+        remaining_churn = MAX_CHURN - num_drop
+        num_add = min(len(add_candidates), 2, remaining_churn)
+
+        if num_add < 1:
+            return None  # must add at least 1
+
+        total_churn = num_drop + num_add
+        if total_churn < 1 or total_churn > MAX_CHURN:
+            return None
+
+        # Build the new space
+        drop_names = {s["name"] for s in drop_candidates[:num_drop]}
+        new_space = [dict(spec) for spec in current_space if spec["name"] not in drop_names]
+        for p in add_candidates[:num_add]:
+            new_space.append(dict(p))
+
+        return new_space
 
     def _build_narrow_changes(
         self,

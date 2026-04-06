@@ -394,3 +394,156 @@ class TestWidenSearch:
         # No boundary hit → should not widen; with only 1 round since narrow → continue
         assert decision.action != "widen_search"
         assert decision.action == "continue"
+
+
+# ---------------------------------------------------------------------------
+# Helper for revise_search tests
+# ---------------------------------------------------------------------------
+
+def _xgboost_all_params():
+    """All 16 XGBoost params (9 default + 7 extended) as dicts."""
+    return DEFAULT_SEARCH_SPACE + [
+        {"name": "max_leaves", "type": "int", "low": 0, "high": 256, "log": False, "choices": None},
+        {"name": "max_bin", "type": "int", "low": 64, "high": 512, "log": False, "choices": None},
+        {"name": "colsample_bylevel", "type": "float", "low": 0.3, "high": 1.0, "log": False, "choices": None},
+        {"name": "colsample_bynode", "type": "float", "low": 0.3, "high": 1.0, "log": False, "choices": None},
+        {"name": "scale_pos_weight", "type": "float", "low": 0.5, "high": 10.0, "log": False, "choices": None},
+        {"name": "grow_policy", "type": "categorical", "low": None, "high": None, "log": False, "choices": ["depthwise", "lossguide"]},
+        {"name": "max_delta_step", "type": "float", "low": 0.0, "high": 10.0, "log": False, "choices": None},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Revise search tests
+# ---------------------------------------------------------------------------
+
+class TestReviseSearch:
+
+    def setup_method(self):
+        self.reasoner = AgentReasoner()
+
+    def test_revises_on_multi_round_plateau_no_dominant(self):
+        """2+ rounds no improvement + plateau + all param importance < 30% + available_params → revise_search."""
+        # All importances below 30% (no dominant param)
+        low_importance = {
+            "learning_rate": 0.12,
+            "max_depth": 0.10,
+            "n_estimators": 0.09,
+            "subsample": 0.08,
+            "colsample_bytree": 0.07,
+            "min_child_weight": 0.06,
+            "gamma": 0.04,
+            "reg_alpha": 0.03,
+            "reg_lambda": 0.02,
+        }
+        prev_summary = _make_summary(
+            round_id=1,
+            new_best_in_round=False,
+            delta_from_prev=0.0,
+            plateau_signal=True,
+            param_importance=low_importance,
+        )
+        current_summary = _make_summary(
+            round_id=2,
+            new_best_in_round=False,
+            delta_from_prev=0.0,
+            plateau_signal=True,
+            param_importance=low_importance,
+        )
+        available = _xgboost_all_params()
+        decision = self.reasoner.decide(
+            summary=current_summary,
+            round_number=3,
+            current_search_space=DEFAULT_SEARCH_SPACE,
+            prev_summaries=[prev_summary],
+            prev_decisions=[],
+            available_params=available,
+        )
+        assert decision.action == "revise_search"
+        assert decision.proposed_search_space is not None
+        # The proposed space should differ from current (some params added/dropped)
+        current_names = {s["name"] for s in DEFAULT_SEARCH_SPACE}
+        proposed_names = {s["name"] for s in decision.proposed_search_space}
+        assert current_names != proposed_names
+
+    def test_no_revise_when_dominant_param_exists(self):
+        """Plateau but dominant param at 45% → should NOT revise_search."""
+        dominant_importance = {
+            "learning_rate": 0.45,  # dominant
+            "max_depth": 0.10,
+            "n_estimators": 0.08,
+            "subsample": 0.06,
+            "colsample_bytree": 0.05,
+            "min_child_weight": 0.04,
+            "gamma": 0.03,
+            "reg_alpha": 0.02,
+            "reg_lambda": 0.01,
+        }
+        prev_summary = _make_summary(
+            round_id=1,
+            new_best_in_round=False,
+            delta_from_prev=0.0,
+            plateau_signal=True,
+            param_importance=dominant_importance,
+        )
+        current_summary = _make_summary(
+            round_id=2,
+            new_best_in_round=False,
+            delta_from_prev=0.0,
+            plateau_signal=True,
+            param_importance=dominant_importance,
+        )
+        available = _xgboost_all_params()
+        decision = self.reasoner.decide(
+            summary=current_summary,
+            round_number=3,
+            current_search_space=DEFAULT_SEARCH_SPACE,
+            prev_summaries=[prev_summary],
+            prev_decisions=[],
+            available_params=available,
+        )
+        assert decision.action != "revise_search"
+
+    def test_revise_respects_max_churn(self):
+        """If revise_search is triggered, verify added + dropped <= 3."""
+        low_importance = {
+            "learning_rate": 0.12,
+            "max_depth": 0.10,
+            "n_estimators": 0.09,
+            "subsample": 0.08,
+            "colsample_bytree": 0.07,
+            "min_child_weight": 0.06,
+            "gamma": 0.04,
+            "reg_alpha": 0.03,
+            "reg_lambda": 0.02,
+        }
+        prev_summary = _make_summary(
+            round_id=1,
+            new_best_in_round=False,
+            delta_from_prev=0.0,
+            plateau_signal=True,
+            param_importance=low_importance,
+        )
+        current_summary = _make_summary(
+            round_id=2,
+            new_best_in_round=False,
+            delta_from_prev=0.0,
+            plateau_signal=True,
+            param_importance=low_importance,
+        )
+        available = _xgboost_all_params()
+        decision = self.reasoner.decide(
+            summary=current_summary,
+            round_number=3,
+            current_search_space=DEFAULT_SEARCH_SPACE,
+            prev_summaries=[prev_summary],
+            prev_decisions=[],
+            available_params=available,
+        )
+        assert decision.action == "revise_search"
+        assert decision.proposed_search_space is not None
+        current_names = {s["name"] for s in DEFAULT_SEARCH_SPACE}
+        proposed_names = {s["name"] for s in decision.proposed_search_space}
+        added = proposed_names - current_names
+        dropped = current_names - proposed_names
+        assert len(added) + len(dropped) <= 3
