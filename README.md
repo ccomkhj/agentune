@@ -76,7 +76,7 @@ flowchart TB
     end
 
     subgraph Backends["Backends"]
-        XGB["XGBoost<br/>9 default / 16 total params"]
+        XGB["XGBoost<br/>9 default / 19 total params"]
         LGB["LightGBM<br/>10 default / 17 total params"]
         CB["CatBoost<br/>7 default / 14 total params"]
     end
@@ -191,6 +191,7 @@ uv run agentune report my-campaign        # HTML report
 | `export` | Best params as JSON |
 | `pause` / `resume` / `stop` | Lifecycle control |
 | `baseline` | Plain Optuna run for comparison |
+| `benchmark` | 3-way comparison: all-params vs top-5 vs default-9 |
 
 ### MCP Tools
 

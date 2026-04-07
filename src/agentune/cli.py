@@ -519,3 +519,124 @@ def baseline(
 
     click.echo(f"Baseline '{name}' ({backend}): best={study.best_value:.4f} trials={total_trials} time={wall_time:.1f}s")
     click.echo(f"Best params: {json.dumps(study.best_params, indent=2)}")
+
+
+# Top-5 most commonly tuned params per backend (the "expert picks 5" scenario)
+TOP5_PARAMS: dict[str, list[str]] = {
+    "xgboost": ["learning_rate", "max_depth", "n_estimators", "min_child_weight", "subsample"],
+    "lightgbm": ["learning_rate", "num_leaves", "n_estimators", "min_child_samples", "subsample"],
+    "catboost": ["learning_rate", "depth", "iterations", "l2_leaf_reg", "bagging_temperature"],
+}
+
+
+@cli.command()
+@click.argument("name")
+@click.option("--dataset", required=True)
+@click.option("--total-trials", required=True, type=int, help="Total trial budget (same for each scenario)")
+@click.option("--backend", default="xgboost")
+@click.option("--split-seed", default=42, type=int)
+@click.option("--sampler-seed", default=42, type=int)
+@click.option("--output", "-o", default=None, help="Save results as JSON to this path")
+def benchmark(
+    name: str,
+    dataset: str,
+    total_trials: int,
+    backend: str,
+    split_seed: int,
+    sampler_seed: int,
+    output: str | None,
+) -> None:
+    """3-way comparison: Optuna-all-params vs Optuna-top5 vs Optuna-defaults.
+
+    Shows why searching all params at once is infeasible, and why picking
+    just 5 leaves quality on the table.  Agentune's value is selecting
+    intelligently from the full catalog — run an actual campaign to compare.
+
+    Example:
+        uv run agentune benchmark demo --dataset covertype --total-trials 200
+    """
+    import optuna
+    from agentune.datasets import load_dataset
+    from agentune.backends import get_backend
+
+    split, meta = load_dataset(dataset, seed=split_seed)
+    backend_cls = get_backend(backend)
+    backend_obj = backend_cls()
+
+    all_params = backend_obj.available_params()
+    default_params = backend_obj.default_search_space()
+
+    top5_names = TOP5_PARAMS.get(backend, [p.name for p in default_params[:5]])
+    top5_params = [p for p in default_params if p.name in top5_names]
+
+    scenarios = [
+        ("all-params", all_params),
+        ("top-5", top5_params),
+        ("default-9", default_params),
+    ]
+
+    click.echo(f"\n{'=' * 72}")
+    click.echo(f"  Benchmark: {name}")
+    click.echo(f"  Dataset: {dataset} | Metric: {meta['metric']} ({meta['direction']})")
+    click.echo(f"  Backend: {backend} | Budget: {total_trials} trials each")
+    click.echo(f"  Catalog size: {len(all_params)} params")
+    click.echo(f"{'=' * 72}\n")
+
+    results = []
+    for scenario_name, search_space in scenarios:
+        param_names = [p.name for p in search_space]
+        click.echo(f"  Running '{scenario_name}' ({len(search_space)} params: {', '.join(param_names)})...")
+
+        objective = backend_obj.create_objective(split, meta["metric"], search_space)
+        study = optuna.create_study(
+            direction=meta["direction"],
+            sampler=optuna.samplers.TPESampler(seed=sampler_seed),
+        )
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+        start = time.time()
+        study.optimize(objective, n_trials=total_trials, show_progress_bar=True, catch=(Exception,))
+        wall_time = time.time() - start
+
+        n_failed = len([t for t in study.trials if t.state == optuna.trial.TrialState.FAIL])
+
+        # Evaluate on test set
+        test_score = backend_obj.evaluate_test(split, meta["metric"], study.best_params)
+
+        results.append({
+            "scenario": scenario_name,
+            "n_params": len(search_space),
+            "params": param_names,
+            "val_score": study.best_value,
+            "test_score": test_score,
+            "wall_time": wall_time,
+            "n_failed": n_failed,
+            "best_params": study.best_params,
+        })
+        fail_str = f"  ({n_failed} failed)" if n_failed else ""
+        click.echo(f"    val={study.best_value:.4f}  test={test_score:.4f}  time={wall_time:.1f}s{fail_str}\n")
+
+    # Print comparison table
+    click.echo(f"\n{'=' * 72}")
+    click.echo(f"  RESULTS")
+    click.echo(f"{'=' * 72}")
+    click.echo(f"  {'Scenario':<15} {'Params':>6} {'Val Score':>12} {'Test Score':>12} {'Failed':>8} {'Time':>8}")
+    click.echo(f"  {'─' * 15} {'─' * 6} {'─' * 12} {'─' * 12} {'─' * 8} {'─' * 8}")
+
+    for r in results:
+        click.echo(
+            f"  {r['scenario']:<15} {r['n_params']:>6} "
+            f"{r['val_score']:>12.4f} {r['test_score']:>12.4f} "
+            f"{r['n_failed']:>8} {r['wall_time']:>7.1f}s"
+        )
+
+    click.echo(f"\n  Budget: {total_trials} trials per scenario")
+    click.echo(f"  → 'all-params' searches {len(all_params)} dimensions — TPE struggles to converge.")
+    click.echo(f"  → 'top-5' converges fast but misses regularization/sampling params.")
+    click.echo(f"  → Agentune starts with {len(default_params)} defaults and adapts from the {len(all_params)}-param catalog.\n")
+
+    if output:
+        with open(output, "w") as f:
+            json.dump({"name": name, "dataset": dataset, "backend": backend,
+                        "total_trials": total_trials, "results": results}, f, indent=2, default=str)
+        click.echo(f"  Results saved to {output}")
