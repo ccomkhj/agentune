@@ -1,6 +1,12 @@
-# agentune
+<p align="center">
+  <img src="assets/logo.png" alt="agentune logo" width="300">
+</p>
 
-[![CI](https://github.com/huijokim/agentune/actions/workflows/ci.yml/badge.svg)](https://github.com/huijokim/agentune/actions/workflows/ci.yml)
+<h1 align="center">agentune</h1>
+
+<p align="center">
+  <a href="https://github.com/huijokim/agentune/actions/workflows/ci.yml"><img src="https://github.com/huijokim/agentune/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
 
 Agent-driven hyperparameter optimization with Optuna. Claude Code acts as the LLM agent -- reading round summaries via MCP tools, diagnosing signals like parameter importance and convergence plateaus, and proposing search space changes -- while Optuna runs the optimization deterministically within each round.
 
