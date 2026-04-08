@@ -564,8 +564,6 @@ def _render_html(campaign: dict, rounds: list[dict], decisions: list[dict]) -> s
   .context-diagnosis {{ font-size: 0.8rem; margin-top: 0.5rem; }}
   .context-diagnosis ul {{ margin: 0.25rem 0 0 1.25rem; }}
   .context-diagnosis li {{ color: var(--text-muted); margin: 0.15rem 0; }}
-  .decision-justification {{ font-size: 0.85rem; margin-top: 0.5rem; }}
-  .decision-justification .label {{ color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }}
   /* Action-type colors */
   .action-continue .decision-action, .decision.action-continue {{ border-left-color: var(--green); }}
   .action-continue .decision-action {{ color: var(--green); }}
