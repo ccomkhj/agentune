@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentune.report import (
+    _build_decision_card,
     _build_decision_context,
     _build_score_chart,
     _build_search_space_evolution,
@@ -494,3 +495,55 @@ class TestGenerateReport:
         html = generate_report(db, "test-campaign")
         assert "<!DOCTYPE html>" in html
         assert "Decision Log" in html
+
+
+# ---------------------------------------------------------------------------
+# TestDecisionLogStyling
+# ---------------------------------------------------------------------------
+
+class TestDecisionLogStyling:
+    """Test that decision cards have action-specific color classes and icons."""
+
+    def _make_decision(self, action="continue", accepted=True, rejection_reason=None):
+        return {
+            "round": 1,
+            "action": action,
+            "accepted": accepted,
+            "rejection_reason": rejection_reason,
+            "justification": "Test justification",
+            "reasoning": None,
+            "proposed_search_space": None,
+            "summary": {"best_score": 0.9, "param_importance": {}},
+            "prev_search_space": [],
+        }
+
+    def test_continue_has_green_class(self):
+        from agentune.report import _build_decision_card
+        html = _build_decision_card(self._make_decision("continue"))
+        assert "action-continue" in html
+        assert "\u25b6" in html  # ▶
+
+    def test_narrow_search_has_accent_class(self):
+        from agentune.report import _build_decision_card
+        html = _build_decision_card(self._make_decision("narrow_search"))
+        assert "action-narrow_search" in html
+        assert "\u25c1" in html  # ◁
+
+    def test_revise_search_has_purple_class_and_highlight(self):
+        from agentune.report import _build_decision_card
+        html = _build_decision_card(self._make_decision("revise_search"))
+        assert "action-revise_search" in html
+        assert "decision-highlight" in html
+        assert "\u21bb" in html  # ↻
+
+    def test_stop_has_red_class(self):
+        from agentune.report import _build_decision_card
+        html = _build_decision_card(self._make_decision("stop"))
+        assert "action-stop" in html
+        assert "\u25a0" in html  # ■
+
+    def test_rejected_keeps_rejected_class(self):
+        from agentune.report import _build_decision_card
+        html = _build_decision_card(self._make_decision("narrow_search", accepted=False, rejection_reason="cooldown"))
+        assert "rejected" in html
+        assert "cooldown" in html

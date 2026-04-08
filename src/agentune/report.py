@@ -9,6 +9,15 @@ from typing import Any
 from agentune.core.campaign import CampaignService
 from agentune.core.db import Database
 
+ACTION_ICONS = {
+    "continue": "\u25b6",        # ▶
+    "narrow_search": "\u25c1",   # ◁
+    "widen_search": "\u25b7",    # ▷
+    "revise_search": "\u21bb",   # ↻
+    "increase_budget": "\u25b2", # ▲
+    "stop": "\u25a0",            # ■
+}
+
 
 def _load_json(value: Any) -> Any:
     if isinstance(value, str):
@@ -369,6 +378,39 @@ def generate_report(db: Database, campaign_name: str) -> str:
     return _render_html(campaign, round_data, decision_data)
 
 
+def _build_decision_card(d: dict) -> str:
+    """Build a single decision card with action-specific styling."""
+    action = d["action"]
+    icon = ACTION_ICONS.get(action, "")
+    status_class = "accepted" if d["accepted"] else "rejected"
+    status_label = "ACCEPTED" if d["accepted"] else "REJECTED"
+    action_class = f"action-{action}"
+    highlight_class = " decision-highlight" if action == "revise_search" else ""
+
+    rejection_html = ""
+    if not d["accepted"] and d.get("rejection_reason"):
+        rejection_html = f'<div class="rejection">Rejected: {d["rejection_reason"]}</div>'
+
+    context_html = _build_decision_context(d)
+    space_change_html = _build_space_change_html(d)
+
+    return f"""
+        <div class="decision {status_class} {action_class}{highlight_class}">
+            <div class="decision-header">
+                <span class="decision-round">Round {d['round']}</span>
+                <span class="decision-action {action_class}">{icon} {action}</span>
+                <span class="status-{status_class}">{status_label}</span>
+            </div>
+            {context_html}
+            <details class="decision-justification">
+                <summary class="label">Justification</summary>
+                {d['justification']}
+            </details>
+            {space_change_html}
+            {rejection_html}
+        </div>"""
+
+
 def _render_html(campaign: dict, rounds: list[dict], decisions: list[dict]) -> str:
     name = campaign["name"]
     metric = campaign["metric_name"]
@@ -440,32 +482,7 @@ def _render_html(campaign: dict, rounds: list[dict], decisions: list[dict]) -> s
     # Build decision log with full reasoning context
     decisions_html = ""
     for d in decisions:
-        status_class = "accepted" if d["accepted"] else "rejected"
-        status_label = "ACCEPTED" if d["accepted"] else "REJECTED"
-        rejection_html = ""
-        if not d["accepted"] and d.get("rejection_reason"):
-            rejection_html = f'<div class="rejection">Rejected: {d["rejection_reason"]}</div>'
-
-        # Build "what the agent saw" context from the round summary
-        context_html = _build_decision_context(d)
-
-        # Build search space changes if applicable
-        space_change_html = _build_space_change_html(d)
-
-        decisions_html += f"""
-        <div class="decision {status_class}">
-            <div class="decision-header">
-                <span class="decision-round">Round {d['round']}</span>
-                <span class="decision-action">{d['action']}</span>
-                <span class="status-{status_class}">{status_label}</span>
-            </div>
-            {context_html}
-            <div class="decision-justification">
-                <span class="label">Justification:</span> {d['justification']}
-            </div>
-            {space_change_html}
-            {rejection_html}
-        </div>"""
+        decisions_html += _build_decision_card(d)
 
     # Build search space evolution
     space_html = _build_search_space_evolution(rounds)
@@ -549,6 +566,23 @@ def _render_html(campaign: dict, rounds: list[dict], decisions: list[dict]) -> s
   .context-diagnosis li {{ color: var(--text-muted); margin: 0.15rem 0; }}
   .decision-justification {{ font-size: 0.85rem; margin-top: 0.5rem; }}
   .decision-justification .label {{ color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }}
+  /* Action-type colors */
+  .action-continue .decision-action, .decision.action-continue {{ border-left-color: var(--green); }}
+  .action-continue .decision-action {{ color: var(--green); }}
+  .action-narrow_search .decision-action, .action-widen_search .decision-action {{ color: var(--accent); }}
+  .decision.action-narrow_search, .decision.action-widen_search {{ border-left-color: var(--accent); }}
+  .action-revise_search .decision-action {{ color: var(--purple); }}
+  .decision.action-revise_search {{ border-left-color: var(--purple); }}
+  .action-increase_budget .decision-action {{ color: var(--orange); }}
+  .decision.action-increase_budget {{ border-left-color: var(--orange); }}
+  .action-stop .decision-action {{ color: var(--red); }}
+  .decision.action-stop {{ border-left-color: var(--red); }}
+  .decision.rejected {{ border-left-color: var(--red) !important; }}
+  /* Highlight revise_search as the "aha" moment */
+  .decision-highlight {{ box-shadow: 0 0 12px rgba(188,140,255,0.15); border-width: 1px 1px 1px 3px; }}
+  /* Collapsible justification */
+  .decision-justification {{ font-size: 0.85rem; margin-top: 0.5rem; cursor: pointer; }}
+  .decision-justification summary.label {{ color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }}
   .rejection {{ font-size: 0.8rem; color: var(--red); margin-top: 0.5rem; padding: 0.4rem 0.75rem; background: rgba(248,81,73,0.08); border-radius: 4px; }}
   .status-accepted {{ color: var(--green); font-size: 0.8rem; }}
   .status-rejected {{ color: var(--red); font-size: 0.8rem; }}
