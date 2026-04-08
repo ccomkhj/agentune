@@ -19,6 +19,8 @@ from agentune.core.models import (
     StopConditions,
 )
 from agentune.core.state import CampaignState
+from agentune.datasets import load_dataset
+from agentune.runner import RoundRunner
 
 
 def _get_db() -> Database:
@@ -458,25 +460,102 @@ def report(name: str, output: str | None) -> None:
         db.close()
 
 
+def _print_demo_narration(service: CampaignService, campaign: dict, result) -> None:
+    """Print formatted narration block for --demo mode."""
+    bar = "\u2550" * 56  # ═
+
+    # Get round summary
+    rounds = service.get_rounds(campaign["id"])
+    current_round = None
+    for r in rounds:
+        if r["round_number"] == result.round_number:
+            current_round = r
+            break
+
+    summary = {}
+    if current_round and current_round.get("summary"):
+        summary = _load_json(current_round["summary"])
+
+    # Get latest accepted decision
+    history = service.get_campaign_history(campaign["id"])
+    latest_decision = None
+    for d in reversed(history.get("decisions", [])):
+        if d.get("accepted"):
+            latest_decision = d
+            break
+
+    # Build score line
+    best_score = summary.get("best_score")
+    delta = summary.get("delta_from_prev")
+    score_str = f"{best_score:.4f}" if best_score is not None else "N/A"
+    if delta is not None and delta != 0:
+        sign = "+" if delta > 0 else ""
+        score_str += f" ({sign}{delta:.4f})"
+
+    # Build signals line
+    signals = []
+    importance = summary.get("param_importance", {})
+    top_params = sorted(importance.items(), key=lambda kv: kv[1], reverse=True)[:2]
+    if top_params:
+        signals.append(", ".join(f"{n} ({v:.0%})" for n, v in top_params))
+    if summary.get("plateau_signal"):
+        signals.append("plateau detected")
+    signals_str = "; ".join(signals) if signals else "gathering data"
+
+    # Get max_rounds for display
+    stop_cond = campaign.get("stop_conditions")
+    max_rounds = None
+    if stop_cond:
+        sc = _load_json(stop_cond)
+        max_rounds = sc.get("max_rounds")
+    round_label = f"Round {result.round_number}"
+    if max_rounds:
+        round_label += f"/{max_rounds}"
+
+    # Build decision line
+    decision_str = ""
+    if latest_decision:
+        decision_str = f"  Agent decided: {latest_decision['action']}"
+        justification = latest_decision.get("justification", "")
+        if justification:
+            if len(justification) > 60:
+                justification = justification[:57] + "..."
+            decision_str += f'\n  Reason: "{justification}"'
+
+    click.echo()
+    click.echo(click.style(f"  {bar}", fg="cyan"))
+    click.echo(click.style(f"  {round_label} complete", fg="cyan", bold=True))
+    click.echo(f"  Score: {score_str}")
+    click.echo(f"  Signals: {signals_str}")
+    if decision_str:
+        click.echo(decision_str)
+    if result.stop_reason:
+        click.echo(click.style(f"  Stopped: {result.stop_reason}", fg="yellow"))
+    click.echo(click.style(f"  {bar}", fg="cyan"))
+    click.echo()
+
+
 @cli.command()
 @click.argument("name")
 @click.option("--dataset", required=True, help="Dataset name (see 'agentune init --help' for available datasets). Metric and direction are stored in the campaign config.")
 @click.option("--split-seed", default=42, type=int)
-def run(name: str, dataset: str, split_seed: int) -> None:
+@click.option("--demo", is_flag=True, help="Print formatted narration for live presentations")
+def run(name: str, dataset: str, split_seed: int, demo: bool) -> None:
     """Execute the next study round for a campaign."""
-    from agentune.datasets import load_dataset
-    from agentune.runner import RoundRunner
-
     db = _get_db()
     try:
-        campaign = _get_campaign_or_exit(CampaignService(db), name)
+        service = CampaignService(db)
+        campaign = _get_campaign_or_exit(service, name)
         split, _ = load_dataset(dataset, seed=split_seed)
         runner = RoundRunner(db, split)
         result = runner.run_next_round(campaign["id"])
 
-        click.echo(f"Round {result.round_number}: {result.status}")
-        if result.stop_reason:
-            click.echo(f"Stop reason: {result.stop_reason}")
+        if demo:
+            _print_demo_narration(service, campaign, result)
+        else:
+            click.echo(f"Round {result.round_number}: {result.status}")
+            if result.stop_reason:
+                click.echo(f"Stop reason: {result.stop_reason}")
     except Exception as error:
         _exit_for_exception(error)
     finally:

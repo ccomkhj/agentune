@@ -1,5 +1,6 @@
 import json
 import pytest
+from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 from agentune.cli import cli
 
@@ -101,3 +102,86 @@ class TestCliStatus:
         result = runner.invoke(cli, ["status", "status-test"])
         assert result.exit_code == 0
         assert "CREATED" in result.output
+
+
+class TestRunDemoMode:
+    """Test --demo flag on the run command."""
+
+    @patch("agentune.cli.CampaignService")
+    @patch("agentune.cli._get_db")
+    def test_demo_prints_narration_block(self, mock_get_db, mock_svc_cls):
+        """When --demo is passed, output includes round score and signals."""
+        from agentune.runner import RunResult
+
+        mock_db = MagicMock()
+        mock_get_db.return_value = mock_db
+
+        mock_svc = MagicMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_svc.get_campaign_by_name.return_value = {
+            "id": 1, "name": "test", "state": "RUNNING",
+            "metric_name": "accuracy", "objective_direction": "maximize",
+            "dataset": "breast_cancer", "split_seed": 42,
+            "stop_conditions": '{"max_rounds": 6}',
+        }
+        mock_svc.get_rounds.return_value = [
+            {"round_number": 2, "summary": {
+                "best_score": 0.95, "delta_from_prev": 0.01,
+                "param_importance": {"lr": 0.4, "depth": 0.3},
+                "plateau_signal": False,
+            }},
+        ]
+        mock_svc.get_campaign_history.return_value = {
+            "decisions": [
+                {"round_id": 1, "action": "continue", "accepted": True,
+                 "justification": "Still improving"},
+            ],
+        }
+
+        # Mock the runner that's imported inside the function
+        with patch("agentune.cli.load_dataset") as mock_load, \
+             patch("agentune.cli.RoundRunner") as mock_runner_cls:
+            mock_load.return_value = (MagicMock(), {"metric": "accuracy", "direction": "maximize"})
+            mock_runner = MagicMock()
+            mock_runner_cls.return_value = mock_runner
+            mock_runner.run_next_round.return_value = RunResult(
+                status="AWAITING_AGENT", round_number=2,
+            )
+
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run", "test", "--dataset", "breast_cancer", "--demo"])
+
+        assert result.exit_code == 0
+        assert "Round 2" in result.output
+        assert "0.9500" in result.output
+
+    @patch("agentune.cli.CampaignService")
+    @patch("agentune.cli._get_db")
+    def test_no_demo_prints_minimal(self, mock_get_db, mock_svc_cls):
+        """Without --demo, just the status line."""
+        from agentune.runner import RunResult
+
+        mock_db = MagicMock()
+        mock_get_db.return_value = mock_db
+
+        mock_svc = MagicMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_svc.get_campaign_by_name.return_value = {
+            "id": 1, "name": "test", "state": "RUNNING",
+            "dataset": "breast_cancer", "split_seed": 42,
+        }
+
+        with patch("agentune.cli.load_dataset") as mock_load, \
+             patch("agentune.cli.RoundRunner") as mock_runner_cls:
+            mock_load.return_value = (MagicMock(), {"metric": "accuracy", "direction": "maximize"})
+            mock_runner = MagicMock()
+            mock_runner_cls.return_value = mock_runner
+            mock_runner.run_next_round.return_value = RunResult(
+                status="AWAITING_AGENT", round_number=2,
+            )
+
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run", "test", "--dataset", "breast_cancer"])
+
+        assert result.exit_code == 0
+        assert "Round 2: AWAITING_AGENT" in result.output
