@@ -378,6 +378,36 @@ def generate_report(db: Database, campaign_name: str) -> str:
     return _render_html(campaign, round_data, decision_data)
 
 
+def _build_guardrails_summary(decisions: list[dict]) -> str:
+    """Build a summary box showing rejected proposals (guardrail interventions)."""
+    rejected = [d for d in decisions if not d.get("accepted", True)]
+
+    if not rejected:
+        return """
+        <div class="guardrails-box guardrails-clean">
+            <span class="guardrails-icon">&#x2713;</span>
+            All proposals accepted &mdash; no guardrail interventions
+        </div>"""
+
+    count = len(rejected)
+    label = "proposal rejected" if count == 1 else "proposals rejected"
+    items = ""
+    for d in rejected:
+        items += (
+            f'<div class="guardrails-item">'
+            f'<span class="guardrails-round">Round {d["round"]}</span>: '
+            f'<strong>{d["action"]}</strong> blocked &mdash; {d.get("rejection_reason", "unknown")}'
+            f'</div>'
+        )
+
+    return f"""
+        <div class="guardrails-box guardrails-active">
+            <span class="guardrails-icon">&#x26A0;</span>
+            <strong>{count} {label}</strong> by guardrails
+            {items}
+        </div>"""
+
+
 def _build_decision_card(d: dict) -> str:
     """Build a single decision card with action-specific styling."""
     action = d["action"]
@@ -389,7 +419,14 @@ def _build_decision_card(d: dict) -> str:
 
     rejection_html = ""
     if not d["accepted"] and d.get("rejection_reason"):
-        rejection_html = f'<div class="rejection">Rejected: {d["rejection_reason"]}</div>'
+        rejection_html = f"""
+            <div class="guardrail-callout">
+                <span class="guardrail-label">&#x1f6e1; Guardrail</span>
+                {d["rejection_reason"]}
+            </div>"""
+        followup = d.get("followup_action")
+        if followup:
+            rejection_html += f'<div class="guardrail-followup">Agent then proposed: <strong>{followup}</strong></div>'
 
     context_html = _build_decision_context(d)
     space_change_html = _build_space_change_html(d)
@@ -478,6 +515,16 @@ def _render_html(campaign: dict, rounds: list[dict], decisions: list[dict]) -> s
             params_rows += f"<tr><td>{pname}</td><td>{pval:.6g}</td></tr>\n"
         else:
             params_rows += f"<tr><td>{pname}</td><td>{pval}</td></tr>\n"
+
+    # Enrich rejected decisions with what the agent did next
+    for i, d in enumerate(decisions):
+        if not d["accepted"]:
+            for j in range(i + 1, len(decisions)):
+                if decisions[j]["round"] == d["round"] and decisions[j]["accepted"]:
+                    d["followup_action"] = decisions[j]["action"]
+                    break
+
+    guardrails_html = _build_guardrails_summary(decisions)
 
     # Build decision log with full reasoning context
     decisions_html = ""
@@ -621,6 +668,16 @@ def _render_html(campaign: dict, rounds: list[dict], decisions: list[dict]) -> s
   .tl-label {{ font-size: 0.7rem; color: var(--text-muted); margin-top: 0.4rem; }}
   .tl-action {{ font-size: 0.6rem; color: var(--accent); margin-top: 0.15rem; max-width: 70px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
   .tl-step.current .tl-action {{ color: var(--orange); }}
+  /* Guardrails summary box */
+  .guardrails-box {{ padding: 0.75rem 1.25rem; border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.85rem; }}
+  .guardrails-clean {{ background: rgba(63,185,80,0.08); border: 1px solid var(--green); color: var(--green); }}
+  .guardrails-active {{ background: rgba(248,81,73,0.08); border: 1px solid var(--red); }}
+  .guardrails-icon {{ margin-right: 0.5rem; }}
+  .guardrails-item {{ margin-top: 0.4rem; padding-left: 1.5rem; color: var(--text-muted); font-size: 0.8rem; }}
+  /* Guardrail callout in rejected cards */
+  .guardrail-callout {{ font-size: 0.8rem; color: var(--red); margin-top: 0.5rem; padding: 0.5rem 0.75rem; background: rgba(248,81,73,0.08); border-radius: 4px; border-left: 3px solid var(--red); }}
+  .guardrail-label {{ font-weight: 600; margin-right: 0.4rem; }}
+  .guardrail-followup {{ font-size: 0.8rem; color: var(--text-muted); margin-top: 0.3rem; padding-left: 0.75rem; }}
 </style>
 </head>
 <body>
@@ -695,6 +752,7 @@ def _render_html(campaign: dict, rounds: list[dict], decisions: list[dict]) -> s
 </table>
 
 <h2>Decision Log</h2>
+{guardrails_html}
 {decisions_html}
 
 <footer>

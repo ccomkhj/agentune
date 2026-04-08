@@ -547,3 +547,83 @@ class TestDecisionLogStyling:
         html = _build_decision_card(self._make_decision("narrow_search", accepted=False, rejection_reason="cooldown"))
         assert "rejected" in html
         assert "cooldown" in html
+
+
+# ---------------------------------------------------------------------------
+# TestGuardrailsSummary
+# ---------------------------------------------------------------------------
+
+class TestGuardrailsSummary:
+    """Test the guardrails summary box above the decision log."""
+
+    def test_no_rejections(self):
+        from agentune.report import _build_guardrails_summary
+        decisions = [
+            {"action": "continue", "accepted": True, "rejection_reason": None, "round": 1},
+        ]
+        html = _build_guardrails_summary(decisions)
+        assert "All proposals accepted" in html
+
+    def test_one_rejection(self):
+        from agentune.report import _build_guardrails_summary
+        decisions = [
+            {"action": "narrow_search", "accepted": False, "rejection_reason": "cooldown violation", "round": 2},
+            {"action": "continue", "accepted": True, "rejection_reason": None, "round": 2},
+        ]
+        html = _build_guardrails_summary(decisions)
+        assert "1 proposal rejected" in html
+        assert "narrow_search" in html
+        assert "cooldown violation" in html
+
+    def test_multiple_rejections(self):
+        from agentune.report import _build_guardrails_summary
+        decisions = [
+            {"action": "narrow_search", "accepted": False, "rejection_reason": "cooldown", "round": 2},
+            {"action": "revise_search", "accepted": False, "rejection_reason": "not eligible", "round": 3},
+            {"action": "continue", "accepted": True, "rejection_reason": None, "round": 3},
+        ]
+        html = _build_guardrails_summary(decisions)
+        assert "2 proposals rejected" in html
+
+
+# ---------------------------------------------------------------------------
+# TestRejectedDecisionCard
+# ---------------------------------------------------------------------------
+
+class TestRejectedDecisionCard:
+    """Test enhanced rejected-proposal card rendering."""
+
+    def test_rejected_card_has_guardrail_callout(self):
+        from agentune.report import _build_decision_card
+        d = {
+            "round": 2,
+            "action": "narrow_search",
+            "accepted": False,
+            "rejection_reason": "Cooldown violation: widen_search was applied 1 round(s) ago",
+            "justification": "Tightening ranges",
+            "reasoning": None,
+            "proposed_search_space": None,
+            "summary": {"best_score": 0.9, "param_importance": {}},
+            "prev_search_space": [],
+        }
+        html = _build_decision_card(d)
+        assert "guardrail-callout" in html
+        assert "Cooldown violation" in html
+
+    def test_rejected_card_shows_followup_action(self):
+        from agentune.report import _build_decision_card
+        d = {
+            "round": 2,
+            "action": "narrow_search",
+            "accepted": False,
+            "rejection_reason": "cooldown",
+            "justification": "Tightening ranges",
+            "reasoning": None,
+            "proposed_search_space": None,
+            "summary": {"best_score": 0.9, "param_importance": {}},
+            "prev_search_space": [],
+            "followup_action": "continue",
+        }
+        html = _build_decision_card(d)
+        assert "Agent then proposed" in html
+        assert "continue" in html
