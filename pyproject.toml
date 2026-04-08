@@ -39,12 +39,6 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/huijokim/agentune"
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "pytest-cov",
-]
-
 [project.scripts]
 agentune = "agentune.cli:cli"
 

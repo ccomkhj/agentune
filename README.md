@@ -226,7 +226,7 @@ uv run agentune report my-campaign -o custom-path.html
 ```bash
 docker compose up -d
 uv sync
-uv run pytest tests/ -v    # 196 tests
+uv run pytest tests/ -v
 ```
 
 ## License

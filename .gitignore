@@ -22,9 +22,10 @@ docs/
 catboost_info/
 reports/
 
-# IDE / editor
+# IDE / editor / tools
 .idea/
 .vscode/
+.serena/
 *.swp
 
 # Claude Code local settings
