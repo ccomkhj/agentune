@@ -101,6 +101,8 @@ def cli() -> None:
 @click.option("--split-seed", default=42, type=int)
 @click.option("--target", default="target", help="Target column name for custom CSV/parquet datasets")
 @click.option("--n-jobs", default=1, type=int, help="Number of parallel trial workers (default: 1)")
+@click.option("--mode", default="standard", type=click.Choice(["standard", "strong-exploration"]),
+              help="Campaign mode: standard (conservative guardrails) or strong-exploration (relaxed, aggressive param exploration)")
 def init(
     name: str,
     backend: str,
@@ -119,6 +121,7 @@ def init(
     split_seed: int,
     target: str,
     n_jobs: int,
+    mode: str,
 ) -> None:
     """Create a new optimization campaign."""
     from agentune.datasets import DATASETS, _is_file_path
@@ -179,6 +182,7 @@ def init(
         dataset=dataset,
         split_seed=split_seed,
         n_jobs=n_jobs,
+        mode=mode,
     )
 
     try:

@@ -89,6 +89,28 @@ class TestCliInit:
         assert result.exit_code != 0
 
 
+    def test_init_with_mode(self, runner, test_db_url, monkeypatch):
+        monkeypatch.setenv("AGENTUNE_DB_URL", test_db_url)
+        result = runner.invoke(cli, [
+            "init", "test-explore",
+            "--backend", "xgboost",
+            "--dataset", "breast_cancer",
+            "--mode", "strong-exploration",
+        ])
+        assert result.exit_code == 0, result.output
+        assert "test-explore" in result.output
+
+        # Verify mode was persisted
+        from agentune.core.db import Database
+        from agentune.core.campaign import CampaignService
+        db = Database(test_db_url)
+        db.setup_schema()
+        svc = CampaignService(db)
+        campaign = svc.get_campaign_by_name("test-explore")
+        assert campaign["mode"] == "strong-exploration"
+        db.close()
+
+
 class TestCliStatus:
     def test_status_shows_campaign(self, runner, test_db_url, monkeypatch):
         monkeypatch.setenv("AGENTUNE_DB_URL", test_db_url)
