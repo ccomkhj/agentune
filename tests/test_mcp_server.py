@@ -94,6 +94,25 @@ class TestRunNextRound:
             handle_run_next_round(db, "nonexistent")
 
 
+class TestModeInResponse:
+    def test_get_campaign_status_includes_mode(self, db, service):
+        config = CampaignConfig(
+            metric_name="accuracy",
+            objective_direction="maximize",
+            backend="xgboost",
+            sampler_config={"name": "TPESampler", "seed": 42},
+            initial_search_space=[ParamSpec(name="max_depth", type="int", low=1, high=15)],
+            improvement_criteria=ImprovementCriteria(mode="strict_better"),
+            stop_conditions=StopConditions(patience_rounds=3),
+            trials_per_round=50,
+            dataset="breast_cancer",
+            mode="strong-exploration",
+        )
+        service.create_campaign("test-mode-mcp", config)
+        result = handle_get_campaign_status(db, "test-mode-mcp")
+        assert result["mode"] == "strong-exploration"
+
+
 class TestTestScoreStripping:
     """test_score must be stripped from MCP responses while a campaign is active."""
 
