@@ -32,6 +32,10 @@ uv run agentune init <name> --backend <backend> --metric <metric> --direction <m
 Available backends: `xgboost`, `lightgbm`, `catboost`
 Available datasets: `breast_cancer`, `california_housing`, `digits`, `covertype`, `credit_g`, `phoneme`, `store_sales`, `rossmann`
 
+Available modes:
+- `standard` (default): Conservative guardrails — 2-round cooldown, max 3 param swaps per revise, revise only when plateau/no improvement
+- `strong-exploration`: Relaxed guardrails — no cooldown, unlimited param swaps, revise allowed anytime. Use when you want aggressive exploration of the full parameter catalog.
+
 ### 2. Run the campaign (single trigger)
 
 When the user says "run campaign X" or "optimize X", run the **entire campaign autonomously** using this loop. Do not wait for user input between rounds.
@@ -98,6 +102,20 @@ Before deciding, match the round summary signals to the tuning guide's diagnosti
 1. Look at `param_importance` — drop params with <5% importance across multiple rounds
 2. Consult the tuning guide's diagnostics — add params that address the diagnosis (e.g., regularization params if overfitting, tree structure params if underfitting)
 3. Keep at least 2-3 params from the previous space for continuity
+
+### Strong-exploration mode
+
+In `strong-exploration` mode, guardrails are relaxed:
+- `revise_search` is allowed **every round**, even when improving — you don't need plateau/no-improvement signals
+- **No churn limit** — you can swap the entire parameter set in one round
+- **No cooldown** between narrow↔widen reversals
+
+Use this mode when:
+- The default parameter set may not contain the right params for this dataset
+- You want the agent to aggressively explore different parameter subsets from the full catalog
+- You have enough trial budget (6+ rounds) to absorb exploration cost
+
+The agent should still cite specific signals in justifications and track which param sets worked vs. didn't.
 
 ### When to stop
 - No improvement for 2+ consecutive rounds
