@@ -189,6 +189,48 @@ class RoundRunner:
         report_path = self._auto_generate_report(campaign_id)
         return RunResult("COMPLETED", round_number, stop_reason, report_path)
 
+    def _exploration_reset(
+        self,
+        campaign_id: int,
+        campaign: dict,
+        current_round: dict,
+        round_number: int,
+        current_reset: int,
+    ) -> RunResult:
+        """Auto-reset: pick new params, create a new round, return AWAITING_AGENT."""
+        from agentune.exploration import select_exploration_params
+
+        backend_cls = get_backend(campaign["backend"])
+        backend = backend_cls()
+        rounds = self._service.get_rounds(campaign_id)
+
+        new_params = select_exploration_params(backend, rounds)
+        new_search_space = [p.to_dict() for p in new_params]
+        new_reset = current_reset + 1
+        new_round_number = len(rounds) + 1
+        new_study_name = f"{campaign['name']}_round_{new_round_number}"
+
+        # Close current round
+        self._service.transition_round(current_round["id"], RoundState.AWAITING_AGENT)
+        self._service.transition_round(current_round["id"], RoundState.RESOLVED)
+
+        # Create new round with incremented reset_number
+        with self._db.connection() as conn:
+            conn.execute(
+                "INSERT INTO study_rounds "
+                "(campaign_id, round_number, optuna_study_name, search_space, budget, "
+                "trial_offset, parent_round_id, reset_number) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    campaign_id, new_round_number, new_study_name,
+                    json.dumps(new_search_space), campaign["trials_per_round"],
+                    0, current_round["id"], new_reset,
+                ),
+            )
+
+        report_path = self._auto_generate_report(campaign_id)
+        return RunResult("AWAITING_AGENT", round_number, report_path=report_path)
+
     def run_next_round(self, campaign_id: int) -> RunResult:
         lease = LeaseManager(self._db)
         lease.acquire(campaign_id)
@@ -360,11 +402,18 @@ class RoundRunner:
         if hard_stop:
             return self._complete_after_summary(campaign_id, current_round["id"], round_number, hard_stop)
 
-        # Patience check
-        all_summaries = self._round_summaries(rounds)
+        # Patience check — scoped by reset_number
+        current_reset = current_round.get("reset_number", 0)
+        reset_rounds = [r for r in rounds if r.get("reset_number", 0) == current_reset]
+        all_summaries = self._round_summaries(reset_rounds)
         all_summaries.append(summary)
 
         if Scheduler.check_patience(all_summaries, improvement, campaign["objective_direction"], stop_cond.patience_rounds):
+            if campaign.get("mode") == "strong-exploration":
+                # Auto-reset: select new params, create new round, continue
+                return self._exploration_reset(
+                    campaign_id, campaign, current_round, round_number, current_reset,
+                )
             return self._complete_after_summary(campaign_id, current_round["id"], round_number, "patience")
 
         # Check pause requested
