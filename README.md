@@ -126,19 +126,24 @@ Each round: Optuna runs N trials with the backend's objective function -> Summar
 
 ### Strong-Exploration Mode
 
-When you have enough trial budget and want the agent to aggressively explore different parameter subsets from the full catalog, use `--mode strong-exploration`:
+When you have a time budget and want the agent to keep searching and exploring until the clock runs out, use `--mode strong-exploration` with `--max-wall-time`:
 
 ```bash
+# Explore for 24 hours, report the best params at the end
 uv run agentune init my-campaign --backend xgboost --dataset covertype \
-  --trials-per-round 40 --max-rounds 10 --mode strong-exploration
+  --trials-per-round 40 --max-wall-time 86400 --mode strong-exploration
 ```
 
-This relaxes three guardrails:
+Then ask Claude Code:
+
+> "Run campaign my-campaign -- keep exploring until time runs out and report the best parameters"
+
+This relaxes three guardrails so the agent can freely explore the full parameter catalog:
 - `revise_search` allowed **every round**, even when improving -- no plateau signal required
 - **No churn limit** -- the agent can swap the entire parameter set in one round
 - **No cooldown** between narrow/widen reversals
 
-Use this when the default parameter set may not contain the right params for your dataset and you have 6+ rounds to absorb the exploration cost. In standard mode (default), the agent is conservative and only revises when it detects a plateau or lack of improvement.
+In standard mode (default), the agent is conservative: it only revises parameters when it detects a plateau. Strong-exploration mode removes those constraints, letting the agent radically swap parameter sets each round for the duration of the time budget.
 
 ## Datasets
 
