@@ -121,20 +121,19 @@ class TestDatasetPersistence:
         assert retrieved["dataset"] == "breast_cancer"
         assert retrieved["split_seed"] == 42
 
-    def test_campaign_requires_dataset(self, service):
-        """CampaignConfig without dataset should fail at construction."""
-        with pytest.raises(TypeError):
-            CampaignConfig(
-                metric_name="accuracy",
-                objective_direction="maximize",
-                backend="xgboost",
-                sampler_config={"name": "TPESampler", "seed": 42},
-                initial_search_space=[ParamSpec(name="max_depth", type="int", low=1, high=15)],
-                improvement_criteria=ImprovementCriteria(mode="strict_better"),
-                stop_conditions=StopConditions(patience_rounds=3),
-                trials_per_round=50,
-                # dataset is missing — should fail
-            )
+    def test_campaign_without_dataset_defaults_to_none(self, service):
+        """CampaignConfig without dataset defaults to None."""
+        config = CampaignConfig(
+            metric_name="accuracy",
+            objective_direction="maximize",
+            backend="xgboost",
+            sampler_config={"name": "TPESampler", "seed": 42},
+            initial_search_space=[ParamSpec(name="max_depth", type="int", low=1, high=15)],
+            improvement_criteria=ImprovementCriteria(mode="strict_better"),
+            stop_conditions=StopConditions(patience_rounds=3),
+            trials_per_round=50,
+        )
+        assert config.dataset is None
 
 
 class TestTerminationMetadata:
