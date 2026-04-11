@@ -196,11 +196,12 @@ class CampaignService:
                 reason=invalid_search_space,
             )
 
-        # Cooldown check
+        # Cooldown check — skipped in strong-exploration mode
         if proposal.action in STRUCTURAL_ACTIONS:
-            rejection = self._check_cooldown(campaign_id, proposal.action)
-            if rejection:
-                return self._record_decision(campaign_id, proposal, accepted=False, reason=rejection)
+            if campaign.get("mode") != "strong-exploration":
+                rejection = self._check_cooldown(campaign_id, proposal.action)
+                if rejection:
+                    return self._record_decision(campaign_id, proposal, accepted=False, reason=rejection)
 
         # revise_search validation
         if proposal.action == REVISION_ACTION:
@@ -344,22 +345,25 @@ class CampaignService:
         self, campaign: dict, current_round: dict, proposal: ActionProposal,
     ) -> str | None:
         """Validate revise_search: eligibility, structural change, churn limit."""
+        is_explore = campaign.get("mode") == "strong-exploration"
+
         # 1. Eligibility: check latest summary for plateau or weak importance
-        summary = current_round.get("summary")
-        if summary:
-            if isinstance(summary, str):
-                summary = json.loads(summary)
-            plateau = summary.get("plateau_signal", False)
-            importance = summary.get("param_importance", {})
-            new_best = summary.get("new_best_in_round", True)
-            max_importance = max(importance.values()) if importance else 0
-            # Eligible if: plateau, or no new best, or no dominant param
-            eligible = plateau or not new_best or max_importance < 0.15
-            if not eligible:
-                return (
-                    "revise_search not eligible: round shows improvement with clear param signal. "
-                    "Use narrow_search or widen_search instead."
-                )
+        #    Skipped in strong-exploration mode
+        if not is_explore:
+            summary = current_round.get("summary")
+            if summary:
+                if isinstance(summary, str):
+                    summary = json.loads(summary)
+                plateau = summary.get("plateau_signal", False)
+                importance = summary.get("param_importance", {})
+                new_best = summary.get("new_best_in_round", True)
+                max_importance = max(importance.values()) if importance else 0
+                eligible = plateau or not new_best or max_importance < 0.15
+                if not eligible:
+                    return (
+                        "revise_search not eligible: round shows improvement with clear param signal. "
+                        "Use narrow_search or widen_search instead."
+                    )
 
         # 2. Structural change: must add or drop at least one param
         current_space_raw = current_round.get("search_space")
@@ -376,13 +380,14 @@ class CampaignService:
         if not added and not dropped:
             return "revise_search must add or drop at least one parameter. Use narrow_search or widen_search for range-only changes."
 
-        # 3. Churn limit
-        total_churn = len(added) + len(dropped)
-        if total_churn > MAX_REVISE_CHURN:
-            return (
-                f"revise_search churn limit exceeded: {total_churn} param swaps "
-                f"(added={list(added)}, dropped={list(dropped)}), max is {MAX_REVISE_CHURN}"
-            )
+        # 3. Churn limit — unlimited in strong-exploration mode
+        if not is_explore:
+            total_churn = len(added) + len(dropped)
+            if total_churn > MAX_REVISE_CHURN:
+                return (
+                    f"revise_search churn limit exceeded: {total_churn} param swaps "
+                    f"(added={list(added)}, dropped={list(dropped)}), max is {MAX_REVISE_CHURN}"
+                )
 
         return None
 

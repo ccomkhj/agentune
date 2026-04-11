@@ -496,3 +496,152 @@ class TestReviseSearch:
         )
         result = service.submit_proposal(campaign["id"], widen)
         assert result["accepted"] is True
+
+
+class TestStrongExplorationMode:
+    """Tests that strong-exploration mode relaxes guardrails."""
+
+    @pytest.fixture
+    def explore_config(self):
+        return CampaignConfig(
+            metric_name="accuracy",
+            objective_direction="maximize",
+            backend="xgboost",
+            sampler_config={"name": "TPESampler", "seed": 42},
+            initial_search_space=[
+                ParamSpec(name="max_depth", type="int", low=1, high=15),
+                ParamSpec(name="learning_rate", type="float", low=0.001, high=1.0, log=True),
+                ParamSpec(name="n_estimators", type="int", low=50, high=500),
+                ParamSpec(name="min_child_weight", type="float", low=1.0, high=10.0),
+                ParamSpec(name="subsample", type="float", low=0.5, high=1.0),
+            ],
+            improvement_criteria=ImprovementCriteria(mode="strict_better"),
+            stop_conditions=StopConditions(max_rounds=10, patience_rounds=3),
+            trials_per_round=50,
+            dataset="breast_cancer",
+            mode="strong-exploration",
+        )
+
+    def test_revise_search_allowed_without_plateau(self, service, explore_config):
+        """In strong-exploration, revise_search is allowed even when round shows improvement."""
+        campaign = service.create_campaign("test-explore-revise", explore_config)
+        service.transition_campaign(campaign["id"], CampaignState.RUNNING)
+        r1 = service.get_rounds(campaign["id"])[0]
+        _advance_round_to_awaiting(service, campaign["id"], r1["id"])
+        service.write_summary(r1["id"], {
+            "schema_version": 1,
+            "best_score": 0.95,
+            "plateau_signal": False,
+            "param_importance": {"max_depth": 0.45, "learning_rate": 0.30},
+            "param_ranges_used": {},
+            "new_best_in_round": True,
+            "delta_from_prev": 0.01,
+        })
+
+        proposal = ActionProposal(
+            action="revise_search",
+            justification="Exploring different param set despite improvement",
+            proposed_search_space=[
+                {"name": "learning_rate", "type": "float", "low": 0.001, "high": 1.0, "log": True},
+                {"name": "max_leaves", "type": "int", "low": 0, "high": 256},
+                {"name": "max_bin", "type": "int", "low": 32, "high": 1024},
+            ],
+            reference_round_ids=[r1["id"]],
+        )
+        result = service.submit_proposal(campaign["id"], proposal)
+        assert result["accepted"] is True
+
+    def test_high_churn_allowed(self, service, explore_config):
+        """In strong-exploration, swapping more than 3 params is allowed."""
+        campaign = service.create_campaign("test-explore-churn", explore_config)
+        service.transition_campaign(campaign["id"], CampaignState.RUNNING)
+        r1 = service.get_rounds(campaign["id"])[0]
+        _advance_round_to_awaiting(service, campaign["id"], r1["id"])
+        service.write_summary(r1["id"], {
+            "schema_version": 1, "plateau_signal": True,
+            "param_importance": {}, "param_ranges_used": {},
+            "new_best_in_round": False,
+        })
+
+        proposal = ActionProposal(
+            action="revise_search",
+            justification="Complete param overhaul",
+            proposed_search_space=[
+                {"name": "gamma", "type": "float", "low": 0.0, "high": 5.0},
+                {"name": "reg_alpha", "type": "float", "low": 1e-8, "high": 10.0, "log": True},
+                {"name": "reg_lambda", "type": "float", "low": 1e-8, "high": 10.0, "log": True},
+                {"name": "max_leaves", "type": "int", "low": 0, "high": 256},
+                {"name": "max_bin", "type": "int", "low": 32, "high": 1024},
+            ],
+            reference_round_ids=[r1["id"]],
+        )
+        result = service.submit_proposal(campaign["id"], proposal)
+        assert result["accepted"] is True
+
+    def test_no_cooldown_between_reversals(self, service, explore_config):
+        """In strong-exploration, no cooldown between narrow and widen."""
+        campaign = service.create_campaign("test-explore-cooldown", explore_config)
+        service.transition_campaign(campaign["id"], CampaignState.RUNNING)
+
+        r1 = service.get_rounds(campaign["id"])[0]
+        _advance_round_to_awaiting(service, campaign["id"], r1["id"])
+        narrow = ActionProposal(
+            action="narrow_search",
+            justification="Focus",
+            proposed_search_space=[
+                {"name": "max_depth", "type": "int", "low": 3, "high": 10},
+                {"name": "learning_rate", "type": "float", "low": 0.01, "high": 0.5, "log": True},
+                {"name": "n_estimators", "type": "int", "low": 100, "high": 400},
+                {"name": "min_child_weight", "type": "float", "low": 2.0, "high": 8.0},
+                {"name": "subsample", "type": "float", "low": 0.6, "high": 0.9},
+            ],
+            reference_round_ids=[r1["id"]],
+        )
+        result = service.submit_proposal(campaign["id"], narrow)
+        assert result["accepted"] is True
+
+        r2 = service.get_rounds(campaign["id"])[1]
+        _advance_round_to_awaiting(service, campaign["id"], r2["id"])
+        widen = ActionProposal(
+            action="widen_search",
+            justification="Expand back",
+            proposed_search_space=[
+                {"name": "max_depth", "type": "int", "low": 1, "high": 20},
+                {"name": "learning_rate", "type": "float", "low": 0.0001, "high": 2.0, "log": True},
+                {"name": "n_estimators", "type": "int", "low": 50, "high": 500},
+                {"name": "min_child_weight", "type": "float", "low": 1.0, "high": 10.0},
+                {"name": "subsample", "type": "float", "low": 0.5, "high": 1.0},
+            ],
+            reference_round_ids=[r2["id"]],
+        )
+        result = service.submit_proposal(campaign["id"], widen)
+        assert result["accepted"] is True
+
+    def test_standard_mode_still_enforces_guardrails(self, service, sample_config):
+        """Verify standard mode still rejects revise_search when improvement exists."""
+        campaign = service.create_campaign("test-standard-guard", sample_config)
+        service.transition_campaign(campaign["id"], CampaignState.RUNNING)
+        r1 = service.get_rounds(campaign["id"])[0]
+        _advance_round_to_awaiting(service, campaign["id"], r1["id"])
+        service.write_summary(r1["id"], {
+            "schema_version": 1,
+            "best_score": 0.95,
+            "plateau_signal": False,
+            "param_importance": {"max_depth": 0.45, "learning_rate": 0.30},
+            "param_ranges_used": {},
+            "new_best_in_round": True,
+            "delta_from_prev": 0.01,
+        })
+
+        proposal = ActionProposal(
+            action="revise_search",
+            justification="Want to explore",
+            proposed_search_space=[
+                {"name": "learning_rate", "type": "float", "low": 0.001, "high": 1.0, "log": True},
+                {"name": "max_leaves", "type": "int", "low": 0, "high": 256},
+            ],
+            reference_round_ids=[r1["id"]],
+        )
+        result = service.submit_proposal(campaign["id"], proposal)
+        assert result["accepted"] is False
+        assert "not eligible" in result["rejection_reason"].lower()
