@@ -143,6 +143,8 @@ This relaxes three guardrails so the agent can freely explore the full parameter
 - **No churn limit** -- the agent can swap the entire parameter set in one round
 - **No cooldown** between narrow/widen reversals
 
+- **Auto-reset on plateau** -- when the agent runs out of improvements, the system automatically picks a new param subset from the full catalog and keeps going. Only the wall-time cap stops the campaign.
+
 In standard mode (default), the agent is conservative: it only revises parameters when it detects a plateau. Strong-exploration mode removes those constraints, letting the agent radically swap parameter sets each round for the duration of the time budget.
 
 ## Datasets

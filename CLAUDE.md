@@ -117,10 +117,13 @@ Use this mode when:
 
 The agent should still cite specific signals in justifications and track which param sets worked vs. didn't.
 
+- **Auto-reset on patience** — when patience triggers, the system automatically selects a new param subset from the full catalog (coverage-based, prioritizing untried params) and creates a new round. The agent can override via `revise_search` or accept the auto-selected params.
+
 ### When to stop
 - No improvement for 2+ consecutive rounds
 - High failure rate (>10%)
 - Target score reached
+- In strong-exploration mode, patience triggers a reset (not a stop). Only hard stops (`max_wall_time`, `max_total_trials`, `target_score`, `max_rounds`) terminate the campaign.
 
 ## Rules
 
