@@ -124,6 +124,22 @@ Each round: Optuna runs N trials with the backend's objective function -> Summar
 - Agent never sees test metrics during active campaigns (stripped from MCP responses; only in final report)
 - Every decision must reference specific round IDs
 
+### Strong-Exploration Mode
+
+When you have enough trial budget and want the agent to aggressively explore different parameter subsets from the full catalog, use `--mode strong-exploration`:
+
+```bash
+uv run agentune init my-campaign --backend xgboost --dataset covertype \
+  --trials-per-round 40 --max-rounds 10 --mode strong-exploration
+```
+
+This relaxes three guardrails:
+- `revise_search` allowed **every round**, even when improving -- no plateau signal required
+- **No churn limit** -- the agent can swap the entire parameter set in one round
+- **No cooldown** between narrow/widen reversals
+
+Use this when the default parameter set may not contain the right params for your dataset and you have 6+ rounds to absorb the exploration cost. In standard mode (default), the agent is conservative and only revises when it detects a plateau or lack of improvement.
+
 ## Datasets
 
 | Dataset | Task | Size | Metric | Direction |
