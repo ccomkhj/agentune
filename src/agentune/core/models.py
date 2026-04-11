@@ -116,6 +116,7 @@ class CampaignConfig:
     dataset: str | None = None
     split_seed: int = 42
     n_jobs: int = 1
+    mode: Literal["standard", "strong-exploration"] = "standard"
 
 
 @dataclass

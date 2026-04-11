@@ -134,3 +134,34 @@ class TestActionProposal:
         )
         with pytest.raises(ValueError, match="reference_round_ids"):
             ap.validate()
+
+
+class TestCampaignConfigMode:
+    def test_default_mode_is_standard(self):
+        config = CampaignConfig(
+            metric_name="accuracy",
+            objective_direction="maximize",
+            backend="xgboost",
+            sampler_config={"name": "TPESampler", "seed": 42},
+            initial_search_space=[ParamSpec(name="max_depth", type="int", low=1, high=15)],
+            improvement_criteria=ImprovementCriteria(mode="strict_better"),
+            stop_conditions=StopConditions(patience_rounds=3),
+            trials_per_round=50,
+            dataset="breast_cancer",
+        )
+        assert config.mode == "standard"
+
+    def test_mode_can_be_set_to_strong_exploration(self):
+        config = CampaignConfig(
+            metric_name="accuracy",
+            objective_direction="maximize",
+            backend="xgboost",
+            sampler_config={"name": "TPESampler", "seed": 42},
+            initial_search_space=[ParamSpec(name="max_depth", type="int", low=1, high=15)],
+            improvement_criteria=ImprovementCriteria(mode="strict_better"),
+            stop_conditions=StopConditions(patience_rounds=3),
+            trials_per_round=50,
+            dataset="breast_cancer",
+            mode="strong-exploration",
+        )
+        assert config.mode == "strong-exploration"
