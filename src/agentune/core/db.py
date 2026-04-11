@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     dataset         TEXT,
     split_seed      INT NOT NULL DEFAULT 42,
     n_jobs          INT NOT NULL DEFAULT 1,
+    mode            TEXT NOT NULL DEFAULT 'standard',
     termination_reason TEXT,
     termination_detail TEXT,
     claimed_by      TEXT,
@@ -63,6 +64,9 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'campaigns' AND column_name = 'n_jobs') THEN
         ALTER TABLE campaigns ADD COLUMN n_jobs INT NOT NULL DEFAULT 1;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'campaigns' AND column_name = 'mode') THEN
+        ALTER TABLE campaigns ADD COLUMN mode TEXT NOT NULL DEFAULT 'standard';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'campaigns' AND column_name = 'termination_reason') THEN
         ALTER TABLE campaigns ADD COLUMN termination_reason TEXT;

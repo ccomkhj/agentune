@@ -68,6 +68,32 @@ class TestCampaignCreation:
             service.create_campaign("test-campaign", sample_config)
 
 
+    def test_campaign_stores_mode(self, service, sample_config):
+        campaign = service.create_campaign("test-mode", sample_config)
+        retrieved = service.get_campaign(campaign["id"])
+        assert retrieved["mode"] == "standard"
+
+    def test_campaign_stores_strong_exploration_mode(self, service):
+        config = CampaignConfig(
+            metric_name="accuracy",
+            objective_direction="maximize",
+            backend="xgboost",
+            sampler_config={"name": "TPESampler", "seed": 42},
+            initial_search_space=[
+                ParamSpec(name="max_depth", type="int", low=1, high=15),
+                ParamSpec(name="learning_rate", type="float", low=0.001, high=1.0, log=True),
+            ],
+            improvement_criteria=ImprovementCriteria(mode="strict_better"),
+            stop_conditions=StopConditions(max_rounds=10, patience_rounds=3),
+            trials_per_round=50,
+            dataset="breast_cancer",
+            mode="strong-exploration",
+        )
+        campaign = service.create_campaign("test-explore", config)
+        retrieved = service.get_campaign(campaign["id"])
+        assert retrieved["mode"] == "strong-exploration"
+
+
 class TestStateTransitions:
     def test_transition_campaign_state(self, service, sample_config):
         campaign = service.create_campaign("test", sample_config)
