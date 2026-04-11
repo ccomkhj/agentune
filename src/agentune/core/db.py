@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS study_rounds (
     summary         JSONB,
     summary_schema_version INT,
     retry_count     INT NOT NULL DEFAULT 0,
+    reset_number    INT NOT NULL DEFAULT 0,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(campaign_id, round_number)
@@ -73,6 +74,9 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'campaigns' AND column_name = 'termination_detail') THEN
         ALTER TABLE campaigns ADD COLUMN termination_detail TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'study_rounds' AND column_name = 'reset_number') THEN
+        ALTER TABLE study_rounds ADD COLUMN reset_number INT NOT NULL DEFAULT 0;
     END IF;
 END $$;
 

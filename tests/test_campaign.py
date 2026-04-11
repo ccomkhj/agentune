@@ -73,6 +73,11 @@ class TestCampaignCreation:
         retrieved = service.get_campaign(campaign["id"])
         assert retrieved["mode"] == "standard"
 
+    def test_round_has_reset_number(self, service, sample_config):
+        campaign = service.create_campaign("test-reset-num", sample_config)
+        rounds = service.get_rounds(campaign["id"])
+        assert rounds[0]["reset_number"] == 0
+
     def test_campaign_stores_strong_exploration_mode(self, service):
         config = CampaignConfig(
             metric_name="accuracy",
