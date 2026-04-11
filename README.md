@@ -26,6 +26,8 @@ Open Claude Code in this directory and ask:
 
 > "Run an HPO campaign on california_housing with 40 trials per round"
 
+See [docs/prompts.md](docs/prompts.md) for more sample prompts including time-bounded exploration, overnight runs, and custom datasets.
+
 Claude reads `CLAUDE.md`, discovers the MCP tools via `.mcp.json`, and drives the full campaign autonomously:
 
 ```mermaid
