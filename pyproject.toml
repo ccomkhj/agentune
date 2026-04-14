@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentune"
+version = "0.1.0"
+description = "Agent-driven hyperparameter optimization with Optuna"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Huijo Kim" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "optuna>=3.6,<4",
+    "psycopg[binary]>=3.1,<4",
+    "xgboost>=2.0,<3",
+    "scikit-learn>=1.4,<2",
+    "click>=8.1,<9",
+    "mcp>=1.0,<2",
+    "sqlalchemy>=2.0.48",
+    "psycopg2-binary>=2.9.11",
+    "pandas>=2.0",
+    "lightgbm>=4.6.0",
+    "catboost>=1.2.10",
+    "mlforecast>=1.0.0",
+    "mlflow>=3.10,<4",
+    "python-dotenv>=1.0,<2",
+]
+
+[project.urls]
+Repository = "https://github.com/huijokim/agentune"
+
+[project.scripts]
+agentune = "agentune.cli:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentune"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.hatch.build]
+artifacts = ["src/agentune/skills/*.md"]

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "agentune": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "python", "-m", "agentune.mcp_server"],
+      "env": {
+        "AGENTUNE_DB_URL": "postgresql://agentune:agentune@localhost:5432/agentune"
+      }
+    }
+  }
+}
